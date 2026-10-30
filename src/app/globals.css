@@ -1,0 +1,140 @@
+@import "tailwindcss";
+
+/*
+  VERDICT — salle de pilotage.
+  Encre (surfaces neutres), craie (texte), filets (bordures). La couleur va sur les
+  données : un seul accent « signal » (le ROAS, la dépense) et cinq tampons de verdict.
+*/
+:root {
+  --ink-0: #07080a;
+  --ink-1: #0c0e11;
+  --ink-2: #121519;
+  --ink-3: #191d22;
+  --ink-well: #050607;
+
+  --chalk-1: #eceef0;
+  --chalk-2: #a7adb5;
+  --chalk-3: #6e757e;
+  --chalk-4: #474d55;
+
+  --rule-1: rgba(255, 255, 255, 0.06);
+  --rule-2: rgba(255, 255, 255, 0.1);
+  --rule-3: rgba(255, 255, 255, 0.16);
+
+  --signal: #5ab4f0;
+  --signal-ink: #0b2233;
+  --signal-wash: rgba(90, 180, 240, 0.13);
+
+  --keep: #5ccf8e;
+  --keep-wash: rgba(92, 207, 142, 0.12);
+  --iterate: #5ab4f0;
+  --iterate-wash: rgba(90, 180, 240, 0.13);
+  --cut: #f2785f;
+  --cut-wash: rgba(242, 120, 95, 0.12);
+  --watch: #e8b95a;
+  --watch-wash: rgba(232, 185, 90, 0.12);
+  --wait: #8a919a;
+  --wait-wash: rgba(138, 145, 154, 0.12);
+
+  --zone-loss: rgba(242, 120, 95, 0.16);
+  --zone-thin: rgba(232, 185, 90, 0.14);
+  --zone-range: rgba(92, 207, 142, 0.2);
+  --zone-jump: rgba(92, 207, 142, 0.09);
+
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --radius-l: 14px;
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@theme inline {
+  --color-ink-0: var(--ink-0);
+  --color-ink-1: var(--ink-1);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-well: var(--ink-well);
+  --color-chalk-1: var(--chalk-1);
+  --color-chalk-2: var(--chalk-2);
+  --color-chalk-3: var(--chalk-3);
+  --color-chalk-4: var(--chalk-4);
+  --color-rule-1: var(--rule-1);
+  --color-rule-2: var(--rule-2);
+  --color-rule-3: var(--rule-3);
+  --color-signal: var(--signal);
+  --color-signal-ink: var(--signal-ink);
+  --color-signal-wash: var(--signal-wash);
+  --color-keep: var(--keep);
+  --color-iterate: var(--iterate);
+  --color-cut: var(--cut);
+  --color-watch: var(--watch);
+  --color-wait: var(--wait);
+  --font-sans: var(--font-instrument), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+  --radius-s: var(--radius-s);
+  --radius-m: var(--radius-m);
+  --radius-l: var(--radius-l);
+}
+
+html {
+  color-scheme: dark;
+  background: var(--ink-0);
+}
+
+body {
+  background: var(--ink-0);
+  color: var(--chalk-1);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "ss01", "cv11";
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+
+h1, h2, h3 {
+  text-wrap: balance;
+  letter-spacing: -0.02em;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.press {
+  transition: transform 140ms var(--ease-out), background-color 140ms var(--ease-out), border-color 140ms var(--ease-out);
+}
+.press:active {
+  transform: scale(0.97);
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise {
+  animation: rise 320ms var(--ease-out) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise { animation: none; }
+  .press:active { transform: none; }
+}
+
+::selection {
+  background: var(--signal-wash);
+  color: var(--chalk-1);
+}
+
+.scrollbar-thin::-webkit-scrollbar { height: 8px; width: 8px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: var(--rule-2); border-radius: 8px; }
