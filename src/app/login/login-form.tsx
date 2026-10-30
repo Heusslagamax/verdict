@@ -24,11 +24,13 @@ export function LoginForm() {
           );
           const { error } = await supabase.auth.signInWithOtp({
             email,
-            options: { shouldCreateUser: false, emailRedirectTo: `${window.location.origin}/auth/confirm` },
+            // Le compte se crée au premier lien, mais la base refuse toute adresse absente
+            // de la liste blanche (table allowed_emails, voir migration 0003).
+            options: { shouldCreateUser: true, emailRedirectTo: `${window.location.origin}/auth/confirm` },
           });
           setState(
             error
-              ? { ok: false, msg: "Envoi impossible. Vérifie que ton adresse a bien été invitée." }
+              ? { ok: false, msg: "Envoi impossible : cette adresse n'est pas autorisée, ou trop de demandes. Réessaie dans quelques minutes." }
               : { ok: true, msg: "Lien envoyé. Ouvre ta boîte mail sur cet appareil." },
           );
         });
