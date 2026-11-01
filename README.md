@@ -13,6 +13,7 @@ validées, les coupées) et celles que tu peux récupérer, script comparé par 
 | --- | --- |
 | Cockpit | Que dit la campagne aujourd'hui (palier, scénario Zecom), et que fais-je de chaque ad ? |
 | Radar concurrents | Quelles créas concurrentes reprendre, lesquelles montent, lesquelles viennent d'être coupées ? |
+| Studio Ads | Quelles itérations produire (tes gagnantes, les créas concurrentes pas encore copiées), en briefs complets suivis jusqu'au résultat Meta. |
 | Brief IA | Le résumé du matin, généré chaque matin vers 6 h 30 (heure de Paris en hiver) à partir des verdicts du moteur. |
 | Réglages | Seuils ROAS par boutique (avec calculateur), colonnes du P&L, concurrents, état des branchements. |
 
@@ -31,6 +32,15 @@ validées, les coupées) et celles que tu peux récupérer, script comparé par 
   7 jours ; « validée » = 14 jours de diffusion et top 10 de la page (ou 100 k de portée) ;
   « coupée » = passée inactive depuis le relevé précédent. « À récupérer » exige un script
   différent de ce qui est déjà testé (ou une itération), jamais une simple comparaison d'image.
+
+- **Sources des pubs** (`src/lib/engine/sources.ts`) : chaque pub peut être reliée à la pub
+  concurrente qu'elle copie. Verdict propose (script, texte d'annonce, verdict IA d'une langue à
+  l'autre, recherche IA à la demande), tu confirmes. Le radar sait alors ce qui est déjà copié.
+- **Studio Ads** (`src/lib/engine/studio.ts`) : le moteur choisit quoi itérer à partir des chiffres,
+  avec des règles tirées des skills (Zecom créas 3.2, 4.0, 5, 6.5, 10, 11, 12 ; crea-1-1 ; bibliothèque
+  DTC 7-8), chacune citée. L'IA écrit les briefs dans ce cadre (hook, script dans la langue du marché
+  + traduction, plan de montage, CTA, production). Relier un brief à la pub lancée affiche son
+  résultat et confirme sa source.
 
 Tests du moteur, sur les exemples chiffrés de la formation et sur ta ligne Norveline : `npm test`.
 

@@ -8,7 +8,7 @@ import type { CompetitorSignal } from "@/lib/types";
 import { compact, eur, int, signed } from "@/lib/format";
 import { setFlag } from "@/app/actions";
 
-type Tab = "recover" | "montante" | "winner" | "coupee" | "all";
+type Tab = "recover" | "montante" | "winner" | "coupee" | "copied" | "all";
 
 const SIGNAL: Record<CompetitorSignal, { label: string; fg: string; bg: string }> = {
   montante: { label: "Monte", fg: "var(--signal)", bg: "var(--signal-wash)" },
@@ -40,6 +40,7 @@ export function RadarBoard({
       montante: scoped.filter((a) => a.read.signals.includes("montante")).sort((a, b) => (b.rankDelta ?? 0) - (a.rankDelta ?? 0)),
       winner: scoped.filter((a) => a.read.signals.includes("winner")).sort((a, b) => (b.daysRunning ?? 0) - (a.daysRunning ?? 0)),
       coupee: scoped.filter((a) => a.read.signals.includes("coupee")).sort((a, b) => (b.lastSeenAt ?? "").localeCompare(a.lastSeenAt ?? "")),
+      copied: scoped.filter((a) => a.copiedBy.length).sort((a, b) => (b.reach ?? 0) - (a.reach ?? 0)),
       all: [...scoped].sort((a, b) => strength(b) - strength(a)),
     }),
     [scoped],
@@ -50,6 +51,7 @@ export function RadarBoard({
     { id: "montante", label: "Qui montent" },
     { id: "winner", label: "Validées" },
     { id: "coupee", label: "Coupées" },
+    { id: "copied", label: "Déjà copiées" },
     { id: "all", label: "Toutes" },
   ];
 
@@ -93,8 +95,12 @@ export function RadarBoard({
 
       {tab === "recover" ? (
         <p className="mt-3 max-w-[80ch] text-[13px] text-chalk-3">
-          Créas fortes chez le concurrent (validées, qui montent ou à forte portée) dont le script n&apos;est pas déjà dans ton adset. Une itération d&apos;un
-          script déjà testé est acceptée.
+          Créas fortes chez le concurrent (validées, qui montent ou à forte portée) pas encore copiées : leur script n&apos;est pas déjà dans ton adset
+          et aucune de tes pubs n&apos;y est reliée. Une itération d&apos;un script déjà testé est acceptée. Le Studio Ads en fait des briefs.
+        </p>
+      ) : tab === "copied" ? (
+        <p className="mt-3 max-w-[80ch] text-[13px] text-chalk-3">
+          Créas concurrentes reliées à une de tes pubs (confirmé dans le détail de la pub, ou depuis le Studio quand tu lances un brief).
         </p>
       ) : null}
 
@@ -109,6 +115,8 @@ export function RadarBoard({
             ? "Rien à récupérer pour l'instant : toutes les créas fortes sont déjà testées, ignorées ou trop récentes."
             : tab === "coupee"
               ? "Aucune créa coupée depuis le dernier relevé."
+              : tab === "copied"
+                ? "Aucune pub reliée pour l'instant : ouvre une pub dans le cockpit et confirme sa source concurrente."
               : "Rien dans cette lecture pour l'instant."}
         </div>
       ) : null}
@@ -165,6 +173,11 @@ function AdCard({ ad, shopSlug }: { ad: CompetitorAdView; shopSlug: string }) {
                 {SIGNAL[s].label}
               </span>
             ))}
+          {ad.copiedBy.length ? (
+            <span className="rounded-[5px] px-1.5 py-0.5 text-[11px] font-medium text-chalk-1" style={{ background: "rgba(5,6,7,0.82)" }}>
+              ◆ Copiée
+            </span>
+          ) : null}
         </div>
       </div>
 
@@ -190,6 +203,17 @@ function AdCard({ ad, shopSlug }: { ad: CompetitorAdView; shopSlug: string }) {
 
         {ad.transcript || ad.body ? (
           <p className="line-clamp-4 whitespace-pre-line text-[13px] leading-5 text-chalk-2">{ad.transcript ?? ad.body}</p>
+        ) : null}
+
+        {ad.copiedBy.length ? (
+          <p className="flex flex-wrap items-center gap-1.5 text-[12px]">
+            <span className="text-chalk-3">Copiée par</span>
+            {ad.copiedBy.map((c) => (
+              <a key={c.adId} href={`/${shopSlug}?ad=${c.adId}`} className="rounded-[5px] bg-ink-3 px-1.5 py-0.5 text-chalk-1 hover:bg-ink-4">
+                {c.name}
+              </a>
+            ))}
+          </p>
         ) : null}
 
         <p className={clsx("text-[12px] leading-5", ad.read.recoverable ? "text-keep" : "text-chalk-3")}>

@@ -8,7 +8,9 @@ import { demoMode } from "@/lib/env";
 import * as repo from "@/lib/data/repo";
 import { metaIsStale, runAiMatches, syncCompetitors, syncMeta } from "@/lib/data/sync";
 import { briefPayload, buildCockpit, buildRadar } from "@/lib/data/views";
-import { verifyAnthropicKey, writeMorningBrief } from "@/lib/adapters/ai";
+import { findSource, verifyAnthropicKey, writeMorningBrief, writeStudioBriefs } from "@/lib/adapters/ai";
+import { buildStudio, studioPayload, type CompetitorStudioSource } from "@/lib/data/studio";
+import { MAX_BRIEFS, RULES } from "@/lib/engine/studio";
 import { lookup, verifyTrendtrackKey } from "@/lib/adapters/trendtrack";
 import { verifyMetaToken, type MetaAccount } from "@/lib/adapters/meta";
 import {
@@ -362,4 +364,165 @@ export async function cancelAccountInvitationAction(invitationId: string): Promi
   await repo.cancelAccountInvitation(z.string().uuid().parse(invitationId));
   revalidatePath("/admin");
   return { ok: true, message: "Invitation annulée" };
+}
+
+// ---------- Sources des pubs ----------
+const LinkInput = z.object({
+  adId: z.string().min(1).max(64),
+  competitorAdId: z.string().max(128),
+  competitorId: z.string().max(64).nullable().transform((v) => v || null),
+});
+
+/** Confirme la pub concurrente d'origine (competitorAdId vide = pub originale). */
+export async function confirmSourceAction(slug: string, input: z.input<typeof LinkInput> & { method?: "manuel" | "script" | "texte" | "ia"; score?: number | null }): Promise<ActionResult> {
+  const { workspace, viewer } = await requireWorkspace();
+  try {
+    const shop = await shopOrThrow(workspace.id, slug);
+    const { adId, competitorAdId, competitorId } = LinkInput.parse(input);
+    if (competitorId) {
+      const competitors = await repo.listCompetitors(shop);
+      if (!competitors.some((c) => c.id === competitorId)) throw new Error("Concurrent introuvable pour cette boutique");
+    }
+    await repo.setSourceLink(shop, { adId, competitorId, competitorAdId, status: "confirmed", method: input.method ?? "manuel", score: input.score ?? null }, viewer.demo ? null : viewer.id);
+    revalidatePath(`/${slug}`, "layout");
+    return { ok: true, message: competitorAdId ? "Source confirmée" : "Marquée comme pub originale" };
+  } catch (e) {
+    return { ok: false, message: e instanceof z.ZodError ? e.issues[0].message : errMsg(e) };
+  }
+}
+
+export async function rejectSourceAction(slug: string, input: z.input<typeof LinkInput>): Promise<ActionResult> {
+  const { workspace, viewer } = await requireWorkspace();
+  try {
+    const shop = await shopOrThrow(workspace.id, slug);
+    const { adId, competitorAdId, competitorId } = LinkInput.parse(input);
+    await repo.setSourceLink(shop, { adId, competitorId, competitorAdId, status: "rejected", method: "manuel" }, viewer.demo ? null : viewer.id);
+    revalidatePath(`/${slug}`, "layout");
+    return { ok: true, message: "Suggestion écartée" };
+  } catch (e) {
+    return { ok: false, message: errMsg(e) };
+  }
+}
+
+export async function clearSourceAction(slug: string, adId: string): Promise<ActionResult> {
+  const { workspace } = await requireWorkspace();
+  try {
+    const shop = await shopOrThrow(workspace.id, slug);
+    await repo.clearSourceLink(shop, z.string().min(1).max(64).parse(adId));
+    revalidatePath(`/${slug}`, "layout");
+    return { ok: true, message: "Source retirée" };
+  } catch (e) {
+    return { ok: false, message: errMsg(e) };
+  }
+}
+
+/** Demande à l'IA quelle pub concurrente est la source (rien n'est enregistré : l'utilisateur confirme). */
+export async function findSourceAiAction(slug: string, adId: string): Promise<ActionResult & { match?: { competitorAdId: string; competitorId: string; reason: string; confidence: string } }> {
+  const { workspace } = await requireWorkspace();
+  try {
+    const creds = await getCredentials(workspace.id);
+    if (!creds.anthropic) return { ok: false, message: "Ajoute ta clé Anthropic dans Réglages → Connexions pour la recherche IA." };
+    const view = await buildCockpit(workspace, slug, "7d");
+    if (!view) throw new Error("Boutique introuvable");
+    const ad = view.campaigns.flatMap((c) => c.adsets.flatMap((s) => s.ads)).find((a) => a.id === adId);
+    if (!ad) throw new Error("Pub introuvable");
+    const candidates = view.competitorAds.filter((c) => c.text.trim()).slice(0, 60);
+    if (!candidates.length) return { ok: false, message: "Aucune pub concurrente avec du texte : lance un relevé du radar." };
+    const r = await findSource(creds.anthropic, {
+      own: { name: ad.name, script: ad.script, body: ad.creative.body },
+      candidates: candidates.map((c) => ({ id: c.id, competitor: c.competitorName, text: c.text })),
+    });
+    const hit = r.competitorAdId ? candidates.find((c) => c.id === r.competitorAdId) : null;
+    if (!hit) return { ok: true, message: `L'IA ne trouve pas de source claire. ${r.reason}` };
+    return { ok: true, message: r.reason, match: { competitorAdId: hit.id, competitorId: hit.competitorId, reason: r.reason, confidence: r.confidence } };
+  } catch (e) {
+    return { ok: false, message: `IA : ${errMsg(e)}` };
+  }
+}
+
+// ---------- Studio Ads ----------
+export async function generateStudioAction(slug: string, kind: "own" | "competitor", sourceId: string): Promise<ActionResult> {
+  const { workspace, viewer } = await requireWorkspace();
+  try {
+    const creds = await getCredentials(workspace.id);
+    if (!creds.anthropic) return { ok: false, message: "Ajoute ta clé Anthropic dans Réglages → Connexions pour générer des itérations." };
+    const view = await buildStudio(workspace, slug);
+    if (!view) throw new Error("Boutique introuvable");
+    const source = kind === "own" ? view.own.find((s) => s.ad.id === sourceId) : view.competitors.find((s) => s.ad.id === sourceId);
+    if (!source) throw new Error("Cette pub n'est plus une source d'itération (verdict ou statut changé).");
+    const out = await writeStudioBriefs(creds.anthropic, studioPayload(view, source));
+    const known = new Set(Object.keys(RULES));
+    const allowed = new Set(source.diagnosis.plan.map((p) => p.element));
+    const briefs = out.briefs.filter((b) => allowed.has(b.element)).slice(0, MAX_BRIEFS);
+    if (!briefs.length) throw new Error("réponse hors plan, relance.");
+    const isOwn = kind === "own";
+    await repo.insertStudioBriefs(
+      view.shop,
+      briefs.map((b) => ({
+        sourceKind: kind,
+        sourceId,
+        sourceLabel: "campaignName" in source ? source.ad.name : `${(source as CompetitorStudioSource).ad.competitorName} · ${source.ad.id.slice(-6)}`,
+        competitorId: isOwn ? null : (source as CompetitorStudioSource).ad.competitorId,
+        element: b.element,
+        title: b.title,
+        ruleIds: b.ruleIds.filter((id) => known.has(id)),
+        brief: { why: b.why, hook: b.hook, script: b.script, scriptFr: b.scriptFr, shots: b.shots, cta: b.cta, adCopy: b.adCopy, production: b.production },
+      })),
+      viewer.demo ? null : viewer.id,
+    );
+    revalidatePath(`/${slug}/studio`);
+    return { ok: true, message: `${briefs.length} brief${briefs.length > 1 ? "s" : ""} ajouté${briefs.length > 1 ? "s" : ""}` };
+  } catch (e) {
+    return { ok: false, message: `IA : ${errMsg(e)}` };
+  }
+}
+
+const BriefPatch = z.object({
+  status: z.enum(["a_produire", "en_production", "lancee", "abandonnee"]).optional(),
+  launchedAdId: z.string().max(64).nullable().optional(),
+});
+
+/** Fait avancer un brief ; relier la pub lancée confirme aussi sa source si le brief vient d'un concurrent. */
+export async function updateBriefAction(slug: string, id: string, patch: z.input<typeof BriefPatch>): Promise<ActionResult> {
+  const { workspace, viewer } = await requireWorkspace();
+  try {
+    const shop = await shopOrThrow(workspace.id, slug);
+    const p = BriefPatch.parse(patch);
+    const brief = (await repo.listStudioBriefs(shop)).find((b) => b.id === z.string().uuid().parse(id));
+    if (!brief) throw new Error("Brief introuvable");
+    await repo.updateStudioBrief(shop, brief.id, { status: p.launchedAdId ? "lancee" : p.status, launchedAdId: p.launchedAdId });
+    if (p.launchedAdId && brief.sourceKind === "competitor") {
+      await repo.setSourceLink(shop, { adId: p.launchedAdId, competitorId: brief.competitorId, competitorAdId: brief.sourceId, status: "confirmed", method: "studio" }, viewer.demo ? null : viewer.id);
+    }
+    revalidatePath(`/${slug}`, "layout");
+    return { ok: true, message: "Brief mis à jour" };
+  } catch (e) {
+    return { ok: false, message: e instanceof z.ZodError ? e.issues[0].message : errMsg(e) };
+  }
+}
+
+export async function deleteBriefAction(slug: string, id: string): Promise<ActionResult> {
+  const { workspace } = await requireWorkspace();
+  try {
+    const shop = await shopOrThrow(workspace.id, slug);
+    await repo.deleteStudioBrief(shop, z.string().uuid().parse(id));
+    revalidatePath(`/${slug}/studio`);
+    return { ok: true, message: "Brief supprimé" };
+  } catch (e) {
+    return { ok: false, message: errMsg(e) };
+  }
+}
+
+export async function saveProductBriefAction(slug: string, text: string): Promise<ActionResult> {
+  const { workspace } = await requireWorkspace();
+  if (demoMode) return DEMO;
+  try {
+    const shop = await shopOrThrow(workspace.id, slug);
+    const value = z.string().max(3000, "3 000 caractères maximum").parse(text).trim();
+    await repo.updateShopSettings(workspace.id, shop.id, { product_brief: value || null });
+    revalidatePath("/", "layout");
+    return { ok: true, message: "Fiche produit enregistrée" };
+  } catch (e) {
+    return { ok: false, message: e instanceof z.ZodError ? e.issues[0].message : errMsg(e) };
+  }
 }

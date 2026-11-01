@@ -4,8 +4,9 @@ import { demoMode } from "@/lib/env";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import type { Competitor, CompetitorAd, MetaAd, MetaCampaign, PnlMapping, Shop, Thresholds } from "@/lib/types";
 import type { AiMatch } from "@/lib/engine/competitors";
+import type { SourceLink } from "@/lib/engine/sources";
 import type { MorningBrief } from "@/lib/adapters/ai";
-import { demoCompetitorAds, demoCompetitors, demoMeta, demoShops } from "./demo";
+import { demoCompetitorAds, demoCompetitors, demoMeta, demoShops, demoStudioBriefs } from "./demo";
 
 /**
  * Accès aux tables. Toujours appelé avec un espace déjà vérifié (lib/workspace.ts) ou depuis
@@ -24,6 +25,7 @@ interface ShopRow {
   meta_ad_account_id: string | null;
   thresholds: Thresholds | null;
   pnl: PnlMapping | null;
+  product_brief: string | null;
 }
 
 const toShop = (r: ShopRow): Shop => ({
@@ -34,6 +36,7 @@ const toShop = (r: ShopRow): Shop => ({
   metaAdAccountId: r.meta_ad_account_id,
   thresholds: r.thresholds,
   pnl: r.pnl,
+  productBrief: r.product_brief ?? null,
 });
 
 export async function listShops(wsId: string): Promise<Shop[]> {
@@ -95,7 +98,7 @@ export async function deleteShop(wsId: string, shopId: string) {
 export async function updateShopSettings(
   wsId: string,
   shopId: string,
-  patch: { thresholds?: Thresholds | null; pnl?: PnlMapping | null; meta_ad_account_id?: string | null; name?: string },
+  patch: { thresholds?: Thresholds | null; pnl?: PnlMapping | null; meta_ad_account_id?: string | null; name?: string; product_brief?: string | null },
 ) {
   if (isDemo(wsId)) return;
   const { error } = await supabaseAdmin().from("shops").update(patch).eq("id", shopId).eq("workspace_id", wsId);
@@ -422,4 +425,181 @@ export async function listAllShopsByWorkspace(): Promise<Map<string, Shop[]>> {
     out.set(r.workspace_id, list);
   }
   return out;
+}
+
+// ---------- Sources des pubs (copie de quelle pub concurrente) ----------
+export async function readSourceLinks(shop: Shop): Promise<SourceLink[]> {
+  if (demoMode || shop.id.startsWith("demo")) return demoLinks.get(shop.id) ?? [];
+  const { data, error } = await supabaseAdmin().from("ad_source_links").select("*").eq("shop_id", shop.id);
+  if (error) throw error;
+  return (data ?? []).map((r) => ({
+    adId: r.ad_id,
+    competitorId: r.competitor_id,
+    competitorAdId: r.competitor_ad_id,
+    status: r.status,
+    method: r.method,
+    score: r.score,
+  }));
+}
+
+// Mode démo : liaisons gardées en mémoire, pour pouvoir essayer l'interface.
+const demoLinks = new Map<string, SourceLink[]>();
+
+export async function setSourceLink(
+  shop: Shop,
+  link: { adId: string; competitorId: string | null; competitorAdId: string; status: "confirmed" | "rejected"; method: SourceLink["method"]; score?: number | null },
+  userId: string | null,
+) {
+  if (demoMode || shop.id.startsWith("demo")) {
+    const list = (demoLinks.get(shop.id) ?? []).filter(
+      (l) => !(l.adId === link.adId && (l.competitorAdId === link.competitorAdId || (link.status === "confirmed" && l.status === "confirmed"))),
+    );
+    list.push({ ...link, score: link.score ?? null });
+    demoLinks.set(shop.id, list);
+    return;
+  }
+  const db = supabaseAdmin();
+  if (link.status === "confirmed") {
+    // Une seule source confirmée par pub : l'ancienne est retirée.
+    const { error } = await db.from("ad_source_links").delete().eq("shop_id", shop.id).eq("ad_id", link.adId).eq("status", "confirmed");
+    if (error) throw error;
+  }
+  const { error } = await db.from("ad_source_links").upsert({
+    shop_id: shop.id,
+    ad_id: link.adId,
+    competitor_id: link.competitorId,
+    competitor_ad_id: link.competitorAdId,
+    status: link.status,
+    method: link.method,
+    score: link.score ?? null,
+    updated_by: userId,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+
+export async function clearSourceLink(shop: Shop, adId: string) {
+  if (demoMode || shop.id.startsWith("demo")) {
+    demoLinks.set(shop.id, (demoLinks.get(shop.id) ?? []).filter((l) => !(l.adId === adId && l.status === "confirmed")));
+    return;
+  }
+  const { error } = await supabaseAdmin().from("ad_source_links").delete().eq("shop_id", shop.id).eq("ad_id", adId).eq("status", "confirmed");
+  if (error) throw error;
+}
+
+// ---------- Studio Ads ----------
+export type BriefStatus = "a_produire" | "en_production" | "lancee" | "abandonnee";
+
+export interface StudioBriefRow {
+  id: string;
+  sourceKind: "own" | "competitor";
+  sourceId: string;
+  sourceLabel: string;
+  competitorId: string | null;
+  element: string;
+  title: string;
+  brief: StudioBriefContent;
+  ruleIds: string[];
+  status: BriefStatus;
+  launchedAdId: string | null;
+  createdAt: string;
+}
+
+export interface StudioBriefContent {
+  why: string;
+  hook: { text: string; visual: string };
+  script: string;
+  scriptFr: string;
+  shots: { at: string; visual: string; text: string }[];
+  cta: string;
+  adCopy: string | null;
+  production: string;
+}
+
+const demoBriefs = new Map<string, StudioBriefRow[]>();
+
+export async function listStudioBriefs(shop: Shop): Promise<StudioBriefRow[]> {
+  if (demoMode || shop.id.startsWith("demo")) {
+    if (!demoBriefs.has(shop.id)) demoBriefs.set(shop.id, demoStudioBriefs(shop));
+    return demoBriefs.get(shop.id) ?? [];
+  }
+  const { data, error } = await supabaseAdmin()
+    .from("studio_briefs")
+    .select("*")
+    .eq("shop_id", shop.id)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    sourceKind: r.source_kind,
+    sourceId: r.source_id,
+    sourceLabel: r.source_label,
+    competitorId: r.competitor_id,
+    element: r.element,
+    title: r.title,
+    brief: r.brief as StudioBriefContent,
+    ruleIds: r.rule_ids ?? [],
+    status: r.status,
+    launchedAdId: r.launched_ad_id,
+    createdAt: r.created_at,
+  }));
+}
+
+export async function insertStudioBriefs(
+  shop: Shop,
+  rows: Omit<StudioBriefRow, "id" | "status" | "launchedAdId" | "createdAt">[],
+  userId: string | null,
+) {
+  if (demoMode || shop.id.startsWith("demo")) {
+    const now = new Date().toISOString();
+    demoBriefs.set(shop.id, [
+      ...rows.map((r) => ({ ...r, id: crypto.randomUUID(), status: "a_produire" as const, launchedAdId: null, createdAt: now })),
+      ...(demoBriefs.get(shop.id) ?? []),
+    ]);
+    return;
+  }
+  const { error } = await supabaseAdmin()
+    .from("studio_briefs")
+    .insert(
+      rows.map((r) => ({
+        shop_id: shop.id,
+        source_kind: r.sourceKind,
+        source_id: r.sourceId,
+        source_label: r.sourceLabel,
+        competitor_id: r.competitorId,
+        element: r.element,
+        title: r.title,
+        brief: r.brief,
+        rule_ids: r.ruleIds,
+        created_by: userId,
+      })),
+    );
+  if (error) throw error;
+}
+
+export async function updateStudioBrief(shop: Shop, id: string, patch: { status?: BriefStatus; launchedAdId?: string | null }) {
+  if (demoMode || shop.id.startsWith("demo")) {
+    demoBriefs.set(
+      shop.id,
+      (demoBriefs.get(shop.id) ?? []).map((b) =>
+        b.id === id ? { ...b, ...(patch.status ? { status: patch.status } : {}), ...(patch.launchedAdId !== undefined ? { launchedAdId: patch.launchedAdId } : {}) } : b,
+      ),
+    );
+    return;
+  }
+  const row: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (patch.status) row.status = patch.status;
+  if (patch.launchedAdId !== undefined) row.launched_ad_id = patch.launchedAdId;
+  const { error } = await supabaseAdmin().from("studio_briefs").update(row).eq("id", id).eq("shop_id", shop.id);
+  if (error) throw error;
+}
+
+export async function deleteStudioBrief(shop: Shop, id: string) {
+  if (demoMode || shop.id.startsWith("demo")) {
+    demoBriefs.set(shop.id, (demoBriefs.get(shop.id) ?? []).filter((b) => b.id !== id));
+    return;
+  }
+  const { error } = await supabaseAdmin().from("studio_briefs").delete().eq("id", id).eq("shop_id", shop.id);
+  if (error) throw error;
 }

@@ -14,6 +14,7 @@ export const demoShops: Shop[] = [
     metaAdAccountId: null,
     thresholds: { be: 1.8, targetLow: 2.5, target: 2.85, loss20: 1.33, jump: 4, atcTarget: 11, aov: 55 },
     pnl: null,
+    productBrief: null,
   },
   {
     id: "demo-b",
@@ -23,6 +24,7 @@ export const demoShops: Shop[] = [
     metaAdAccountId: null,
     thresholds: { be: 1.6, targetLow: 2.1, target: 2.35, loss20: 1.25, jump: 3.2, atcTarget: 12, aov: 60 },
     pnl: null,
+    productBrief: null,
   },
 ];
 
@@ -154,4 +156,40 @@ export function demoCompetitorAds(competitor: Competitor, today: Date): Competit
       rankDelta: Math.round(-10 + r() * 50),
     };
   });
+}
+
+/** Brief d'exemple (fictif) pour voir le Studio Ads en mode démo. */
+export function demoStudioBriefs(shop: Shop) {
+  return [
+    {
+      id: "00000000-0000-4000-8000-000000000001",
+      sourceKind: "own" as const,
+      sourceId: `${shop.slug}-ad-1`,
+      sourceLabel: "V01 · témoignage cuisine",
+      competitorId: null,
+      element: "hook",
+      title: "Nouveau hook : le plan du milieu « avant / après » en ouverture",
+      ruleIds: ["Z-5.1-HOOKS", "Z-5.2-HOOK", "Z-5.2-MIDSHOT", "B-8-HOOK"],
+      status: "a_produire" as const,
+      launchedAdId: null,
+      createdAt: new Date().toISOString(),
+      brief: {
+        why: "Exemple fictif. V01 porte 43 % du budget à ROAS 2,55 : on garde le body et on teste un hook neuf, tiré d'un plan du milieu de la vidéo.",
+        hook: { text: "Guarda cosa succede dopo un solo lavaggio", visual: "Plan serré de 3 s : la basket sale entre dans le sac, cut sur la basket propre (plan du milieu de V01)." },
+        script:
+          "Guarda cosa succede dopo un solo lavaggio. Metti le scarpe nel sacco, programma delicato, e basta. Niente spazzole, niente ore perse. Il sacco protegge la forma e i colori. Oggi la promo 1+1 è attiva: prendi il tuo prima che finisca.",
+        scriptFr:
+          "Regarde ce qui se passe après un seul lavage. Mets les chaussures dans le sac, programme délicat, et c'est tout. Pas de brosse, pas d'heures perdues. Le sac protège la forme et les couleurs. Aujourd'hui l'offre 1+1 est active : prends le tien avant la fin.",
+        shots: [
+          { at: "0-3 s", visual: "Basket sale → basket propre (plan du milieu de V01)", text: "Texte : Guarda cosa succede…" },
+          { at: "3-8 s", visual: "Mains qui glissent la basket dans le sac", text: "Voix : programme délicat" },
+          { at: "8-15 s", visual: "Machine qui tourne, puis sortie du sac", text: "Sous-titres" },
+          { at: "15-20 s", visual: "Packshot + offre 1+1", text: "CTA" },
+        ],
+        cta: "Scopri l'offerta 1+1",
+        adCopy: null,
+        production: "Reprendre le body de V01 tel quel dans CapCut ; remplacer les 3 premières secondes par le plan du milieu ; nouvelle voix ElevenLabs sur la phrase d'accroche.",
+      },
+    },
+  ];
 }

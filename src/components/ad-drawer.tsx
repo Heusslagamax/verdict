@@ -3,7 +3,8 @@
 import { useEffect, useState, useTransition } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
-import type { AdView } from "@/lib/data/views";
+import type { AdView, CompetitorAdLite } from "@/lib/data/views";
+import { SourcePanel } from "./cockpit/source-panel";
 import type { Thresholds } from "@/lib/types";
 import { eur, int, pct, roas } from "@/lib/format";
 import { saveAdScript } from "@/app/actions";
@@ -36,9 +37,11 @@ export function AdDrawer({
   thresholds,
   shopSlug,
   windowDays = 7,
+  competitorAds = [],
   onClose,
 }: {
   ad: AdView | null;
+  competitorAds?: CompetitorAdLite[];
   thresholds: Thresholds | null;
   shopSlug: string;
   campaignId: string;
@@ -204,6 +207,8 @@ export function AdDrawer({
                       </table>
                     </details>
                   </section>
+
+                  <SourcePanel key={`src-${ad.id}`} ad={ad} competitorAds={competitorAds} shopSlug={shopSlug} />
 
                   <ScriptEditor key={ad.id} shopSlug={shopSlug} adId={ad.id} initial={ad.script ?? ""} />
                 </div>

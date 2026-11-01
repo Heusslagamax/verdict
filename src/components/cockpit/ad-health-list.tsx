@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import clsx from "clsx";
 import { FileText, Film, ImageIcon } from "lucide-react";
-import type { AdView } from "@/lib/data/views";
+import type { AdView, CompetitorAdLite } from "@/lib/data/views";
 import type { Thresholds, VerdictCode } from "@/lib/types";
 import { eur, int, pct, roas as fmtRoas } from "@/lib/format";
 import { roasCeiling, zoneOf } from "@/lib/zones";
@@ -28,8 +28,9 @@ type Sort = "priority" | "spend" | "roas";
  * quelle créa → quel verdict et pourquoi → où est son ROAS sur le couloir → combien elle coûte
  * → ce qu'elle rapporte → comment elle évolue.
  */
-export function AdHealthList({ ads, thresholds: t, shopSlug, campaignId, windowDays }: {
+export function AdHealthList({ ads, thresholds: t, shopSlug, campaignId, windowDays, competitorAds }: {
   ads: AdView[];
+  competitorAds: CompetitorAdLite[];
   thresholds: Thresholds | null;
   shopSlug: string;
   campaignId: string;
@@ -38,6 +39,7 @@ export function AdHealthList({ ads, thresholds: t, shopSlug, campaignId, windowD
   const [filter, setFilter] = useState<VerdictCode | "all">("all");
   const [sort, setSort] = useState<Sort>("priority");
   const [openId, setAd] = useAdParam();
+  const names = useMemo(() => new Map(competitorAds.map((c) => [c.id, c.competitorName])), [competitorAds]);
   const open = ads.find((a) => a.id === openId) ?? null;
   const ceil = t ? roasCeiling(t, ads.map((a) => a.totals.roas)) : 0;
   const maxShare = Math.max(0.01, ...ads.map((a) => a.share));
@@ -121,6 +123,7 @@ export function AdHealthList({ ads, thresholds: t, shopSlug, campaignId, windowD
                       <span className="text-[12px] text-chalk-3">
                         {a.verdict ? ROLE[a.verdict.role] : null} · {a.ageDays} j
                       </span>
+                      <SourceBadge ad={a} names={names} />
                     </div>
                     {a.verdict ? <p className="mt-1 line-clamp-2 text-[12px] leading-[18px] text-chalk-3">{a.verdict.rule}</p> : null}
                   </div>
@@ -189,7 +192,7 @@ export function AdHealthList({ ads, thresholds: t, shopSlug, campaignId, windowD
       </ul>
       {!rows.length ? <p className="border-t border-rule-1 py-6 text-[13px] text-chalk-3">Aucune pub dans ce filtre.</p> : null}
 
-      <AdDrawer ad={open} thresholds={t} shopSlug={shopSlug} campaignId={campaignId} windowDays={windowDays} onClose={() => setAd(null)} />
+      <AdDrawer ad={open} thresholds={t} shopSlug={shopSlug} campaignId={campaignId} windowDays={windowDays} competitorAds={competitorAds} onClose={() => setAd(null)} />
     </div>
   );
 }
@@ -237,4 +240,26 @@ export function Thumb({ ad, size = 44 }: { ad: AdView; size?: number }) {
 export function roasColor(v: number | null, t: Thresholds | null): string {
   if (!t) return "var(--chalk-3)";
   return zoneOf(v, t)?.color ?? "var(--chalk-3)";
+}
+
+/** D'où vient la pub, en un coup d'œil : copie confirmée, originale, ou source probable à confirmer. */
+function SourceBadge({ ad, names }: { ad: AdView; names: Map<string, string> }) {
+  const s = ad.source;
+  if (s.status === "confirmed") {
+    return (
+      <span className="inline-flex h-5 items-center gap-1 rounded-[5px] bg-ink-3 px-1.5 text-[11px] text-chalk-2">
+        <span aria-hidden className="size-1.5 rotate-45 bg-signal" />
+        Copie {names.get(s.competitorAdId) ?? "concurrent"}
+      </span>
+    );
+  }
+  if (s.status === "original") return <span className="inline-flex h-5 items-center rounded-[5px] bg-ink-3 px-1.5 text-[11px] text-chalk-3">Originale</span>;
+  if (ad.suggestions.length) {
+    return (
+      <span className="inline-flex h-5 items-center rounded-[5px] border border-dashed border-rule-3 px-1.5 text-[11px] text-chalk-3">
+        Source ? {names.get(ad.suggestions[0].competitorAdId) ?? ""}
+      </span>
+    );
+  }
+  return null;
 }

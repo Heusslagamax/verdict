@@ -5,7 +5,7 @@ import { Trash2 } from "lucide-react";
 import type { Shop, Thresholds } from "@/lib/types";
 import { thresholdsFromInputs } from "@/lib/engine/metrics";
 import { roas as fr } from "@/lib/format";
-import { addCompetitorAction, deleteShopAction, removeCompetitorAction, saveShopSettings, type ActionResult } from "@/app/actions";
+import { addCompetitorAction, deleteShopAction, removeCompetitorAction, saveProductBriefAction, saveShopSettings, type ActionResult } from "@/app/actions";
 import type { MetaAccount } from "@/lib/adapters/meta";
 import { Panel } from "@/components/ui";
 
@@ -247,6 +247,8 @@ export function ShopSettings({
         ) : null}
       </div>
 
+      <ProductBrief slug={shop.slug} initial={shop.productBrief ?? ""} />
+
       <section className="mt-6 border-t border-rule-1 pt-5">
         <h3 className="text-[13px] font-medium text-chalk-2">Concurrents suivis</h3>
         <ul className="mt-2">
@@ -294,5 +296,37 @@ export function ShopSettings({
         <p className="mt-2 text-[12px] text-chalk-3">La marque doit être suivie dans ton Brand Tracker TrendTrack. La recherche ne coûte aucun crédit.</p>
       </section>
     </Panel>
+  );
+}
+
+/** Contexte produit pour le Studio Ads : l'IA écrit des briefs plus justes quand elle sait ce qu'on vend. */
+function ProductBrief({ slug, initial }: { slug: string; initial: string }) {
+  const [value, setValue] = useState(initial);
+  const [result, setResult] = useState<ActionResult | null>(null);
+  const [pending, start] = useTransition();
+  return (
+    <section className="mt-6 border-t border-rule-1 pt-5">
+      <h3 className="text-[13px] font-medium text-chalk-2">Fiche produit (Studio Ads)</h3>
+      <p className="mt-0.5 text-[12px] text-chalk-3">Produit, offre et prix, promesse, avatar, objections. Quelques lignes suffisent : le Studio s&apos;en sert pour écrire les briefs.</p>
+      <textarea
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        rows={4}
+        maxLength={3000}
+        placeholder="Ex. Sangle rotulienne à coussin d'air, 1+1 à 39,90 €, 2+2 à 59,90 €, livraison offerte. Promesse : marcher et monter les escaliers sans douleur au genou. Avatar : 50-70 ans, actif, douleurs rotuliennes. Objection : « ça ne tient pas en place »."
+        className="mt-2 w-full resize-y rounded-[var(--radius-m)] border border-rule-2 bg-ink-well px-3 py-2 text-[13px] leading-5 text-chalk-1 placeholder:text-chalk-4 focus:border-rule-3 focus:outline-none"
+      />
+      <div className="mt-2 flex items-center gap-3">
+        <button
+          type="button"
+          disabled={pending || value === initial}
+          onClick={() => start(async () => setResult(await saveProductBriefAction(slug, value)))}
+          className="press h-9 rounded-[var(--radius-m)] border border-rule-2 bg-ink-2 px-3.5 text-[13px] hover:border-rule-3 disabled:opacity-50"
+        >
+          {pending ? "Enregistrement…" : "Enregistrer la fiche"}
+        </button>
+        {result ? <span role="status" className={`text-[12px] ${result.ok ? "text-keep" : "text-cut"}`}>{result.message}</span> : null}
+      </div>
+    </section>
   );
 }

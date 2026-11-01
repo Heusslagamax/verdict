@@ -27,6 +27,8 @@ export interface Shop {
   metaAdAccountId: string | null;
   thresholds: Thresholds | null;
   pnl: PnlMapping | null;
+  /** Fiche produit courte (produit, offre, promesse, avatar) : contexte du Studio Ads. */
+  productBrief: string | null;
 }
 
 /** Où lire le bloc de la boutique dans l'onglet DAILY REPORT du P&L. */

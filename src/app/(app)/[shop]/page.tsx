@@ -91,7 +91,7 @@ function Boards({ view, campaigns, window, slug }: { view: CockpitView; campaign
   return (
     <div className="space-y-12">
       {active.map((c) => (
-        <CampaignBoard key={c.id} c={c} t={view.thresholds} window={window} shopSlug={slug} pnl={view.pnl} />
+        <CampaignBoard key={c.id} c={c} t={view.thresholds} window={window} shopSlug={slug} pnl={view.pnl} competitorAds={view.competitorAds} />
       ))}
       {!active.length ? (
         <Panel className="p-8 text-center">
@@ -106,7 +106,7 @@ function Boards({ view, campaigns, window, slug }: { view: CockpitView; campaign
           </summary>
           <div className="space-y-12 p-4 pt-2">
             {paused.map((c) => (
-              <CampaignBoard key={c.id} c={c} t={view.thresholds} window={window} shopSlug={slug} pnl={view.pnl} />
+              <CampaignBoard key={c.id} c={c} t={view.thresholds} window={window} shopSlug={slug} pnl={view.pnl} competitorAds={view.competitorAds} />
             ))}
           </div>
         </details>

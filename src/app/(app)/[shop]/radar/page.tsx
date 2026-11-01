@@ -31,6 +31,7 @@ export default async function RadarPage({ params }: PageProps<"/[shop]/radar">) 
       winner: own.filter((a) => a.read.signals.includes("winner")).length,
       cut: own.filter((a) => a.read.signals.includes("coupee")).length,
       recover: own.filter((a) => a.read.recoverable).length,
+      copied: own.filter((a) => a.copiedBy.length).length,
     };
   });
   const maxActive = Math.max(1, ...rows.map((r) => r.active));
@@ -91,6 +92,7 @@ export default async function RadarPage({ params }: PageProps<"/[shop]/radar">) 
                   <th className="pb-2 text-right font-normal">Monte</th>
                   <th className="pb-2 text-right font-normal">Validées</th>
                   <th className="pb-2 text-right font-normal">Coupées</th>
+                  <th className="pb-2 text-right font-normal">Copiées</th>
                   <th className="pb-2 text-right font-normal">À récupérer</th>
                 </tr>
               </thead>
@@ -109,6 +111,7 @@ export default async function RadarPage({ params }: PageProps<"/[shop]/radar">) 
                     <td className="num py-3 text-right" style={{ color: r.rising ? "var(--signal)" : "var(--chalk-4)" }}>{r.rising}</td>
                     <td className="num py-3 text-right" style={{ color: r.winner ? "var(--keep)" : "var(--chalk-4)" }}>{r.winner}</td>
                     <td className="num py-3 text-right" style={{ color: r.cut ? "var(--cut)" : "var(--chalk-4)" }}>{r.cut}</td>
+                    <td className="num py-3 text-right" style={{ color: r.copied ? "var(--chalk-1)" : "var(--chalk-4)" }}>{r.copied}</td>
                     <td className="py-3 text-right">
                       <span className="figure text-[18px]" style={{ color: r.recover ? "var(--chalk-1)" : "var(--chalk-4)" }}>{r.recover}</span>
                     </td>

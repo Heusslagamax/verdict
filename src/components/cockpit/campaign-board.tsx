@@ -1,4 +1,4 @@
-import type { CampaignView, PnlView } from "@/lib/data/views";
+import type { CampaignView, CompetitorAdLite, PnlView } from "@/lib/data/views";
 import type { Thresholds, Window } from "@/lib/types";
 import { WINDOW_DAYS } from "@/lib/engine/metrics";
 import { eur, int, pct, roas as fmtRoas, WINDOW_LABEL } from "@/lib/format";
@@ -23,8 +23,10 @@ export function CampaignBoard({
   window,
   shopSlug,
   pnl,
+  competitorAds,
 }: {
   c: CampaignView;
+  competitorAds: CompetitorAdLite[];
   t: Thresholds | null;
   window: Window;
   shopSlug: string;
@@ -217,7 +219,7 @@ export function CampaignBoard({
         <p className="mb-4 mt-0.5 text-[12px] text-chalk-3">
           Aiguille : ROAS {wl}. Rond creux : période précédente. Les jauges partagent la même échelle, elles se comparent d&apos;une ligne à l&apos;autre.
         </p>
-        <AdHealthList ads={ads} thresholds={t} shopSlug={shopSlug} campaignId={c.id} windowDays={wd} />
+        <AdHealthList ads={ads} thresholds={t} shopSlug={shopSlug} campaignId={c.id} windowDays={wd} competitorAds={competitorAds} />
       </div>
     </section>
   );

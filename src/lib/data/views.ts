@@ -22,6 +22,7 @@ import type {
   Window,
 } from "@/lib/types";
 import type { AiMatch } from "@/lib/engine/competitors";
+import { suggestSources, type Suggestion } from "@/lib/engine/sources";
 import * as repo from "./repo";
 import { ensureFreshMeta, ownScripts } from "./sync";
 
@@ -75,6 +76,28 @@ export interface AdView {
   trend: DayPoint[];
   hasScript: boolean;
   script: string | null;
+  /** D'où vient cette pub : copie confirmée d'une pub concurrente, pub originale, ou inconnu. */
+  source: AdSource;
+  /** Pubs concurrentes probables (scripts, textes, IA), à confirmer. */
+  suggestions: Suggestion[];
+}
+
+export type AdSource =
+  | { status: "confirmed"; competitorAdId: string; competitorId: string | null; method: string }
+  | { status: "original" }
+  | { status: "none" };
+
+/** Version légère d'une pub concurrente, pour afficher la source et la choisir à la main. */
+export interface CompetitorAdLite {
+  id: string;
+  competitorId: string;
+  competitorName: string;
+  text: string;
+  thumbnailUrl: string | null;
+  mediaType: "image" | "video" | null;
+  reach: number | null;
+  daysRunning: number | null;
+  active: boolean;
 }
 
 export interface AdsetView {
@@ -128,6 +151,8 @@ export interface CockpitView {
   byWindow: Record<Window, CampaignView[]>;
   /** La photo Meta est périmée : le navigateur lance la resynchronisation en arrière-plan. */
   stale: boolean;
+  /** Pubs concurrentes relevées (sources possibles de mes pubs). */
+  competitorAds: CompetitorAdLite[];
   sources: { meta: boolean; pnl: boolean; demo: boolean };
 }
 
@@ -145,13 +170,41 @@ export async function buildCockpit(
   if (!shop) return null;
   const creds = await getCredentials(ws.id);
 
-  const [{ snap, error: syncError, stale }, scripts, pnl] = await Promise.all([
+  const [{ snap, error: syncError, stale }, scripts, pnl, competitors, links] = await Promise.all([
     ensureFreshMeta(shop, creds, today, { block: opts.blockOnStaleMeta }),
     repo.readScripts(shop),
     loadPnl(ws, shop, today),
+    repo.listCompetitors(shop),
+    repo.readSourceLinks(shop),
   ]);
+  const [compAds, aiMatches] = await Promise.all([repo.readCompetitorAds(competitors, today), repo.readAiMatches(competitors)]);
 
   const ads: MetaAd[] = snap?.ads ?? [];
+  const names = new Map(competitors.map((c) => [c.id, c.name]));
+  const competitorAds: CompetitorAdLite[] = compAds.map((c) => ({
+    id: c.id,
+    competitorId: c.competitorId,
+    competitorName: names.get(c.competitorId) ?? "",
+    text: (c.transcript ?? c.body ?? "").slice(0, 320),
+    thumbnailUrl: c.thumbnailUrl,
+    mediaType: c.mediaType,
+    reach: c.reach,
+    daysRunning: c.daysRunning,
+    active: c.status === "active",
+  }));
+  const confirmed = new Map(links.filter((l) => l.status === "confirmed").map((l) => [l.adId, l]));
+  const suggestions = suggestSources(
+    ads.map((a) => ({ id: a.id, name: a.name, script: scripts.get(a.id) ?? null, body: a.creative.body })),
+    compAds.map((c) => ({ id: c.id, competitorId: c.competitorId, transcript: c.transcript, body: c.body })),
+    links,
+    aiMatches,
+  );
+  const sourceOf = (adId: string): AdSource => {
+    const l = confirmed.get(adId);
+    if (!l) return { status: "none" };
+    if (!l.competitorAdId) return { status: "original" };
+    return { status: "confirmed", competitorAdId: l.competitorAdId, competitorId: l.competitorId, method: l.method };
+  };
   const t = shop.thresholds;
   const axis = lastDays(SERIES_DAYS, today);
 
@@ -194,6 +247,8 @@ export async function buildCockpit(
           trend: series(a.days, axis),
           hasScript: scripts.has(a.id),
           script: scripts.get(a.id) ?? null,
+          source: sourceOf(a.id),
+          suggestions: suggestions.get(a.id) ?? [],
         };
         const set =
           adsets.get(a.adsetId) ??
@@ -248,6 +303,7 @@ export async function buildCockpit(
     campaigns,
     byWindow,
     stale,
+    competitorAds,
     sources: {
       meta: Boolean(creds.meta && shop.metaAdAccountId),
       pnl: Boolean(platform.googleSheets && ws.pnlSpreadsheetId && pnlReady(shop)),
@@ -291,6 +347,8 @@ export interface CompetitorAdView extends CompetitorAd {
   read: CompetitorRead;
   ai: AiMatch | null;
   competitorName: string;
+  /** Mes pubs confirmées comme copies de celle-ci. */
+  copiedBy: { adId: string; name: string }[];
 }
 
 export interface RadarView {
@@ -308,15 +366,30 @@ export async function buildRadar(ws: Workspace, slug: string, today = new Date()
   if (!shop) return null;
   const [competitors, creds] = await Promise.all([repo.listCompetitors(shop), getCredentials(ws.id)]);
   const ads = await repo.readCompetitorAds(competitors, today);
-  const [matches, owned, run] = await Promise.all([
+  const [matches, owned, run, links, snap] = await Promise.all([
     repo.readAiMatches(competitors),
     ownScripts(shop, today, { competitors, compAds: ads }),
     repo.lastRun("trendtrack", shop.id),
+    repo.readSourceLinks(shop),
+    repo.readMetaSnapshot(shop, today),
   ]);
   const names = new Map(competitors.map((c) => [c.id, c.name]));
+  const adNames = new Map((snap?.ads ?? []).map((a) => [a.id, a.name]));
+  const copies = new Map<string, { adId: string; name: string }[]>();
+  for (const l of links) {
+    if (l.status !== "confirmed" || !l.competitorAdId) continue;
+    copies.set(l.competitorAdId, [...(copies.get(l.competitorAdId) ?? []), { adId: l.adId, name: adNames.get(l.adId) ?? l.adId }]);
+  }
   const views = ads.map((a) => {
     const ai = matches.get(`${a.competitorId}:${a.id}`) ?? null;
-    return { ...a, ai, read: readCompetitorAd(a, owned, today, ai), competitorName: names.get(a.competitorId) ?? "" };
+    const copiedBy = copies.get(a.id) ?? [];
+    const read = readCompetitorAd(a, owned, today, ai);
+    // Une créa déjà copiée (liaison confirmée) n'est plus « à récupérer ».
+    if (copiedBy.length) {
+      read.recoverable = false;
+      read.recoverReason = `Déjà copiée : ${copiedBy.map((c) => c.name).join(", ")}.`;
+    }
+    return { ...a, ai, read, copiedBy, competitorName: names.get(a.competitorId) ?? "" };
   });
   return {
     shop,
