@@ -1,8 +1,10 @@
-import Link from "next/link";
+"use client";
+
 import type { AdView } from "@/lib/data/views";
 import type { VerdictCode } from "@/lib/types";
 import { eur } from "@/lib/format";
 import { Stamp } from "@/components/ui";
+import { useAdParam } from "./url-state";
 
 const STEPS: { code: VerdictCode; verb: string; hint: string }[] = [
   { code: "cut", verb: "Couper", hint: "Elles brûlent du budget sans ventes suffisantes." },
@@ -13,7 +15,8 @@ const STEPS: { code: VerdictCode; verb: string; hint: string }[] = [
 ];
 
 /** Les verdicts du jour transformés en liste d'actions, les plus urgentes d'abord. */
-export function TodoList({ ads, href }: { ads: AdView[]; href: (id: string) => string }) {
+export function TodoList({ ads }: { ads: AdView[] }) {
+  const [, open] = useAdParam();
   const groups = STEPS.map((s) => ({ ...s, ads: ads.filter((a) => a.verdict?.code === s.code) })).filter((g) => g.ads.length);
   if (!groups.length) return <p className="text-[13px] text-chalk-3">Aucun verdict : les seuils de la boutique manquent.</p>;
   return (
@@ -29,14 +32,14 @@ export function TodoList({ ads, href }: { ads: AdView[]; href: (id: string) => s
           <ul className="mt-2 flex flex-wrap gap-1.5">
             {g.ads.map((a) => (
               <li key={a.id}>
-                <Link
-                  href={href(a.id)}
-                  scroll={false}
+                <button
+                  type="button"
+                  onClick={() => open(a.id)}
                   className="press inline-flex h-7 max-w-[240px] items-center gap-1.5 rounded-[7px] border border-rule-1 bg-ink-2 px-2 text-[12px] text-chalk-1 hover:border-rule-3"
                 >
                   <span className="truncate">{a.name}</span>
                   <span className="num shrink-0 text-chalk-3">{eur(a.totals.spend, 0)}</span>
-                </Link>
+                </button>
               </li>
             ))}
           </ul>

@@ -2,10 +2,8 @@ import { notFound } from "next/navigation";
 import { Radar } from "lucide-react";
 import Link from "next/link";
 import { requireWorkspace } from "@/lib/workspace";
-import { listShops } from "@/lib/data/repo";
 import { buildRadar } from "@/lib/data/views";
 import { relativeTime } from "@/lib/format";
-import { Shell } from "@/components/shell";
 import { RadarBoard } from "@/components/radar-board";
 import { ActionButton } from "@/components/action-button";
 import { Notice } from "@/components/ui";
@@ -19,7 +17,6 @@ export default async function RadarPage({ params }: PageProps<"/[shop]/radar">) 
   const { shop: slug } = await params;
   const view = await buildRadar(ctx.workspace, slug);
   if (!view) notFound();
-  const shops = await listShops(ctx.workspace.id);
 
   const recover = view.ads.filter((a) => a.read.recoverable).length;
   const cut = view.ads.filter((a) => a.read.signals.includes("coupee")).length;
@@ -39,7 +36,7 @@ export default async function RadarPage({ params }: PageProps<"/[shop]/radar">) 
   const maxActive = Math.max(1, ...rows.map((r) => r.active));
 
   return (
-    <Shell ctx={ctx} shops={shops} current={slug} tab="radar">
+    <>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="eyebrow">Radar concurrents</p>
@@ -129,6 +126,6 @@ export default async function RadarPage({ params }: PageProps<"/[shop]/radar">) 
       <div className="mt-6">
         <RadarBoard ads={view.ads} competitors={view.competitors.map((c) => ({ id: c.id, name: c.name }))} shopSlug={slug} />
       </div>
-    </Shell>
+    </>
   );
 }

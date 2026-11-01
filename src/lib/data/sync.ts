@@ -5,7 +5,7 @@ import { snapshotCompetitor, trendtrackCredits } from "@/lib/adapters/trendtrack
 import { compareScript } from "@/lib/adapters/ai";
 import { readCompetitorAd, type OwnScript } from "@/lib/engine/competitors";
 import type { Credentials } from "@/lib/workspace";
-import type { Shop } from "@/lib/types";
+import type { Competitor, CompetitorAd, Shop } from "@/lib/types";
 import * as repo from "./repo";
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -30,16 +30,27 @@ export async function syncMeta(shop: Shop, creds: Credentials, today = new Date(
   }
 }
 
-/** Meta « en direct » : resynchronise si la photo a plus de META_STALE_MINUTES. */
-export async function ensureFreshMeta(shop: Shop, creds: Credentials, today = new Date()) {
+export function metaIsStale(fetchedAt: string | null | undefined): boolean {
+  if (!fetchedAt) return true;
+  return (Date.now() - new Date(fetchedAt).getTime()) / 60_000 > env.metaStaleMinutes;
+}
+
+/**
+ * Meta « en direct ». Par défaut, la page s'affiche tout de suite avec la dernière photo et
+ * signale qu'elle est périmée (`stale`) : le navigateur lance alors la resynchronisation en
+ * arrière-plan. On n'attend Meta que s'il n'existe encore aucune photo, ou si `block` est
+ * demandé (brief IA, tâche du matin), qui doivent travailler sur des chiffres frais.
+ */
+export async function ensureFreshMeta(shop: Shop, creds: Credentials, today = new Date(), opts: { block?: boolean } = {}) {
   const snap = await repo.readMetaSnapshot(shop, today);
-  const age = snap ? (Date.now() - new Date(snap.fetchedAt).getTime()) / 60_000 : Infinity;
-  if (creds.meta && shop.metaAdAccountId && age > env.metaStaleMinutes) {
+  const canSync = Boolean(creds.meta && shop.metaAdAccountId);
+  const stale = canSync && metaIsStale(snap?.fetchedAt);
+  if (stale && (!snap || opts.block)) {
     const r = await syncMeta(shop, creds, today);
-    if (r.ok) return { snap: await repo.readMetaSnapshot(shop, today), error: null };
-    return { snap, error: r.detail };
+    if (r.ok) return { snap: await repo.readMetaSnapshot(shop, today), error: null, stale: false };
+    return { snap, error: r.detail, stale: false };
   }
-  return { snap, error: null };
+  return { snap, error: null, stale };
 }
 
 /** Photo TrendTrack du jour pour chaque concurrent actif de la boutique. */
@@ -63,15 +74,19 @@ export async function syncCompetitors(shop: Shop, creds: Credentials, today = ne
 }
 
 /** Scripts de référence : tes scripts collés + ceux des créas concurrentes déjà reprises. */
-export async function ownScripts(shop: Shop, today: Date): Promise<OwnScript[]> {
+export async function ownScripts(
+  shop: Shop,
+  today: Date,
+  pre?: { competitors: Competitor[]; compAds: CompetitorAd[] },
+): Promise<OwnScript[]> {
   const [snap, scripts, competitors] = await Promise.all([
     repo.readMetaSnapshot(shop, today),
     repo.readScripts(shop),
-    repo.listCompetitors(shop),
+    pre ? pre.competitors : repo.listCompetitors(shop),
   ]);
   const names = new Map((snap?.ads ?? []).map((a) => [a.id, a.name]));
   const out: OwnScript[] = [...scripts.entries()].map(([adId, text]) => ({ adId, name: names.get(adId) ?? adId, text }));
-  const compAds = await repo.readCompetitorAds(competitors, today);
+  const compAds = pre ? pre.compAds : await repo.readCompetitorAds(competitors, today);
   for (const a of compAds) {
     if (a.userFlag === "deja_teste" || a.userFlag === "iteration") {
       const text = [a.transcript, a.body].filter(Boolean).join("\n");

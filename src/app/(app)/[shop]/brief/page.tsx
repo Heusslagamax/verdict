@@ -2,9 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import { getCredentials, requireWorkspace } from "@/lib/workspace";
-import { getShop, latestBrief, listShops } from "@/lib/data/repo";
+import { getShop, latestBrief } from "@/lib/data/repo";
 import { relativeTime } from "@/lib/format";
-import { Shell } from "@/components/shell";
 import { ActionButton } from "@/components/action-button";
 import { Notice, Panel } from "@/components/ui";
 import { generateBrief } from "@/app/actions";
@@ -16,12 +15,12 @@ const PRIORITY = { haute: "var(--cut)", moyenne: "var(--watch)", basse: "var(--w
 export default async function BriefPage({ params }: PageProps<"/[shop]/brief">) {
   const ctx = await requireWorkspace();
   const { shop: slug } = await params;
-  const [shop, shops, creds] = await Promise.all([getShop(ctx.workspace.id, slug), listShops(ctx.workspace.id), getCredentials(ctx.workspace.id)]);
+  const [shop, creds] = await Promise.all([getShop(ctx.workspace.id, slug), getCredentials(ctx.workspace.id)]);
   if (!shop) notFound();
   const brief = await latestBrief(shop);
 
   return (
-    <Shell ctx={ctx} shops={shops} current={slug} tab="brief">
+    <>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="eyebrow">Brief du matin</p>
@@ -103,6 +102,6 @@ export default async function BriefPage({ params }: PageProps<"/[shop]/brief">) 
           <p className="mt-1 text-[13px] text-chalk-3">Ou lance-le tout de suite avec « Rédiger maintenant ».</p>
         </Panel>
       )}
-    </Shell>
+    </>
   );
 }

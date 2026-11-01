@@ -1,4 +1,5 @@
 import "server-only";
+import { unstable_cache } from "next/cache";
 import { demoMode, platform } from "@/lib/env";
 import { getCredentials, type Workspace } from "@/lib/workspace";
 import { ageInDays, lastDays, sumDays, totalsFor } from "@/lib/engine/metrics";
@@ -14,6 +15,7 @@ import type {
   CompetitorRead,
   Creative,
   MetaAd,
+  PnlMapping,
   Shop,
   Thresholds,
   Totals,
@@ -120,20 +122,31 @@ export interface CockpitView {
   thresholds: Thresholds | null;
   shopTotals: Totals;
   pnl: PnlView | null;
+  /** Campagnes de la période demandée (= byWindow[window]). */
   campaigns: CampaignView[];
+  /** Les trois périodes calculées d'un coup : changer de période ne repasse pas par le serveur. */
+  byWindow: Record<Window, CampaignView[]>;
+  /** La photo Meta est périmée : le navigateur lance la resynchronisation en arrière-plan. */
+  stale: boolean;
   sources: { meta: boolean; pnl: boolean; demo: boolean };
 }
 
 const emptyCounts = (): CampaignView["counts"] => ({ keep: 0, iterate: 0, cut: 0, watch: 0, wait: 0 });
 
-export async function buildCockpit(ws: Workspace, slug: string, window: Window, today = new Date()): Promise<CockpitView | null> {
-  const shops = await repo.listShops(ws.id);
+export async function buildCockpit(
+  ws: Workspace,
+  slug: string,
+  window: Window,
+  today = new Date(),
+  opts: { blockOnStaleMeta?: boolean } = {},
+): Promise<CockpitView | null> {
+  const shops = await repo.listShopsForView(ws.id);
   const shop = shops.find((s) => s.slug === slug);
   if (!shop) return null;
   const creds = await getCredentials(ws.id);
 
-  const [{ snap, error: syncError }, scripts, pnl] = await Promise.all([
-    ensureFreshMeta(shop, creds, today),
+  const [{ snap, error: syncError, stale }, scripts, pnl] = await Promise.all([
+    ensureFreshMeta(shop, creds, today, { block: opts.blockOnStaleMeta }),
     repo.readScripts(shop),
     loadPnl(ws, shop, today),
   ]);
@@ -142,7 +155,8 @@ export async function buildCockpit(ws: Workspace, slug: string, window: Window, 
   const t = shop.thresholds;
   const axis = lastDays(SERIES_DAYS, today);
 
-  const campaigns: CampaignView[] = (snap?.campaigns ?? [])
+  const campaignsFor = (window: Window): CampaignView[] =>
+    (snap?.campaigns ?? [])
     .map((c) => {
       const cAds = ads.filter((a) => a.campaignId === c.id);
       const cDays = cAds.flatMap((a) => a.days);
@@ -215,6 +229,9 @@ export async function buildCockpit(ws: Workspace, slug: string, window: Window, 
     // Campagnes actives d'abord, puis par dépense sur la période.
     .sort((a, b) => Number(b.status === "ACTIVE") - Number(a.status === "ACTIVE") || b.totals.spend - a.totals.spend);
 
+  const byWindow: Record<Window, CampaignView[]> = { "1d": campaignsFor("1d"), "3d": campaignsFor("3d"), "7d": campaignsFor("7d") };
+  const campaigns = byWindow[window];
+
   return {
     shop,
     shops: shops.map((s) => ({ slug: s.slug, name: s.name })),
@@ -229,6 +246,8 @@ export async function buildCockpit(ws: Workspace, slug: string, window: Window, 
     ),
     pnl,
     campaigns,
+    byWindow,
+    stale,
     sources: {
       meta: Boolean(creds.meta && shop.metaAdAccountId),
       pnl: Boolean(platform.googleSheets && ws.pnlSpreadsheetId && pnlReady(shop)),
@@ -237,12 +256,22 @@ export async function buildCockpit(ws: Workspace, slug: string, window: Window, 
   };
 }
 
+/**
+ * Le P&L change une fois par jour : on le garde 5 minutes au lieu de relire le Google Sheets
+ * à chaque page. Clé : fichier + colonnes + jour.
+ */
+const cachedPnlDays = unstable_cache(
+  async (spreadsheetId: string, mapping: PnlMapping, day: string) => fetchPnlDays(spreadsheetId, mapping, new Date(`${day}T12:00:00Z`)),
+  ["pnl-days"],
+  { revalidate: 300 },
+);
+
 const pnlReady = (shop: Shop) => Boolean(shop.pnl?.spendColumn && shop.pnl?.salesColumn && shop.pnl?.roasColumn);
 
 async function loadPnl(ws: Workspace, shop: Shop, today: Date): Promise<PnlView | null> {
   if (!platform.googleSheets || !ws.pnlSpreadsheetId || !pnlReady(shop)) return null;
   try {
-    const days = await fetchPnlDays(ws.pnlSpreadsheetId, shop.pnl!, today);
+    const days = await cachedPnlDays(ws.pnlSpreadsheetId, shop.pnl!, today.toISOString().slice(0, 10));
     const by = new Map(days.map((d) => [d.date, d]));
     return {
       ...pnlRoas(days, today),
@@ -274,14 +303,14 @@ export interface RadarView {
 }
 
 export async function buildRadar(ws: Workspace, slug: string, today = new Date()): Promise<RadarView | null> {
-  const shops = await repo.listShops(ws.id);
+  const shops = await repo.listShopsForView(ws.id);
   const shop = shops.find((s) => s.slug === slug);
   if (!shop) return null;
   const [competitors, creds] = await Promise.all([repo.listCompetitors(shop), getCredentials(ws.id)]);
-  const [ads, matches, owned, run] = await Promise.all([
-    repo.readCompetitorAds(competitors, today),
+  const ads = await repo.readCompetitorAds(competitors, today);
+  const [matches, owned, run] = await Promise.all([
     repo.readAiMatches(competitors),
-    ownScripts(shop, today),
+    ownScripts(shop, today, { competitors, compAds: ads }),
     repo.lastRun("trendtrack", shop.id),
   ]);
   const names = new Map(competitors.map((c) => [c.id, c.name]));

@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { demoMode } from "@/lib/env";
 import { supabaseAdmin } from "@/lib/supabase/server";
 import type { Competitor, CompetitorAd, MetaAd, MetaCampaign, PnlMapping, Shop, Thresholds } from "@/lib/types";
@@ -41,6 +42,9 @@ export async function listShops(wsId: string): Promise<Shop[]> {
   if (error) throw error;
   return (data as ShopRow[]).map(toShop);
 }
+
+/** Pour l'affichage uniquement : une seule lecture par requête (mise en page + page). Les actions lisent sans cache. */
+export const listShopsForView = cache(listShops);
 
 export async function getShop(wsId: string, slug: string): Promise<Shop | null> {
   return (await listShops(wsId)).find((s) => s.slug === slug) ?? null;

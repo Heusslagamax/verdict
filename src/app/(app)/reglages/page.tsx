@@ -2,7 +2,6 @@ import { googleServiceAccountEmail } from "@/lib/env";
 import { credentialStatus, getCredentials, requireWorkspace } from "@/lib/workspace";
 import { listCompetitors, listMembers, listPendingInvitations, listShops } from "@/lib/data/repo";
 import { verifyMetaToken, type MetaAccount } from "@/lib/adapters/meta";
-import { Shell } from "@/components/shell";
 import { Notice } from "@/components/ui";
 import { ShopSettings } from "./shop-settings";
 import { ConnectionsPanel, MembersPanel, NewShopPanel, WorkspacePanel } from "./panels";
@@ -36,7 +35,7 @@ export default async function SettingsPage() {
   }
 
   return (
-    <Shell ctx={ctx} shops={shops} current={null} tab="reglages">
+    <>
       <p className="eyebrow">Réglages</p>
       <h1 className="mt-1 text-[28px] font-semibold tracking-[-0.03em]">{workspace.name}</h1>
       <p className="mt-1 text-[13px] text-chalk-3">
@@ -74,6 +73,6 @@ export default async function SettingsPage() {
           <MembersPanel members={members} pending={invites} viewerId={viewer.id} isOwner={isOwner} />
         </div>
       </div>
-    </Shell>
+    </>
   );
 }

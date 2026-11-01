@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { demoMode } from "@/lib/env";
@@ -37,42 +38,62 @@ export interface Ctx {
 export const ACTIVE_COOKIE = "verdict_ws";
 const DEMO_WS: Workspace = { id: "demo", name: "Espace démo", role: "owner", pnlSpreadsheetId: null };
 
-export async function requireViewer(): Promise<Viewer> {
-  if (demoMode) return { id: "demo", email: "demo@verdict.local", isAdmin: true, demo: true };
+// `cache` : une seule lecture par requête, même si la mise en page, la page et les actions
+// demandent chacune qui est connecté.
+const readClaims = cache(async () => {
   const supabase = await supabaseServer();
   const { data } = await supabase.auth.getClaims();
-  const claims = data?.claims as { sub?: string; email?: string } | undefined;
-  if (!claims?.sub) redirect("/login");
-  const { data: admin } = await supabaseAdmin().from("platform_admins").select("user_id").eq("user_id", claims.sub).maybeSingle();
-  return { id: claims.sub, email: claims.email ?? "", isAdmin: Boolean(admin), demo: false };
-}
+  return data?.claims as { sub?: string; email?: string } | undefined;
+});
 
-export async function listWorkspaces(userId: string): Promise<WorkspaceRef[]> {
+const isPlatformAdmin = cache(async (userId: string) => {
+  const { data } = await supabaseAdmin().from("platform_admins").select("user_id").eq("user_id", userId).maybeSingle();
+  return Boolean(data);
+});
+
+export const requireViewer = cache(async (): Promise<Viewer> => {
+  if (demoMode) return { id: "demo", email: "demo@verdict.local", isAdmin: true, demo: true };
+  const claims = await readClaims();
+  if (!claims?.sub) redirect("/login");
+  return { id: claims.sub, email: claims.email ?? "", isAdmin: await isPlatformAdmin(claims.sub), demo: false };
+});
+
+const readMemberships = cache(async (userId: string) => {
   const { data, error } = await supabaseAdmin()
     .from("workspace_members")
-    .select("role, workspaces(id, name)")
+    .select("role, workspaces(id, name, pnl_spreadsheet_id)")
     .eq("user_id", userId)
     .order("created_at");
   if (error) throw error;
   return (data ?? [])
     .map((r) => {
-      const w = r.workspaces as unknown as { id: string; name: string } | null;
-      return w ? { id: w.id, name: w.name, role: r.role as WorkspaceRef["role"] } : null;
+      const w = r.workspaces as unknown as { id: string; name: string; pnl_spreadsheet_id: string | null } | null;
+      return w ? { id: w.id, name: w.name, role: r.role as WorkspaceRef["role"], pnlSpreadsheetId: w.pnl_spreadsheet_id ?? null } : null;
     })
-    .filter((w): w is WorkspaceRef => w !== null);
+    .filter((w): w is Workspace => w !== null);
+});
+
+export async function listWorkspaces(userId: string): Promise<WorkspaceRef[]> {
+  return (await readMemberships(userId)).map(({ id, name, role }) => ({ id, name, role }));
 }
+
+const loadCtx = cache(async (): Promise<Ctx> => {
+  if (demoMode) return { viewer: await requireViewer(), workspace: DEMO_WS, workspaces: [DEMO_WS] };
+  const claims = await readClaims();
+  if (!claims?.sub) redirect("/login");
+  // Droits d'admin, espaces et cookie en parallèle : une seule attente réseau au lieu de trois.
+  const [viewer, memberships, jar] = await Promise.all([requireViewer(), readMemberships(claims.sub), cookies()]);
+  if (!memberships.length) redirect(viewer.isAdmin ? "/admin" : "/sans-espace");
+  const wanted = jar.get(ACTIVE_COOKIE)?.value;
+  const workspace = memberships.find((w) => w.id === wanted) ?? memberships[0];
+  return { viewer, workspace, workspaces: memberships.map(({ id, name, role }) => ({ id, name, role })) };
+});
 
 /** Espace actif vérifié. Sans espace : page d'explication (ou admin pour un administrateur). */
 export async function requireWorkspace(opts: { owner?: boolean } = {}): Promise<Ctx> {
-  const viewer = await requireViewer();
-  if (viewer.demo) return { viewer, workspace: DEMO_WS, workspaces: [DEMO_WS] };
-  const workspaces = await listWorkspaces(viewer.id);
-  if (!workspaces.length) redirect(viewer.isAdmin ? "/admin" : "/sans-espace");
-  const wanted = (await cookies()).get(ACTIVE_COOKIE)?.value;
-  const ref = workspaces.find((w) => w.id === wanted) ?? workspaces[0];
-  if (opts.owner && ref.role !== "owner") throw new Error("Réservé au propriétaire de l'espace");
-  const { data } = await supabaseAdmin().from("workspaces").select("pnl_spreadsheet_id").eq("id", ref.id).single();
-  return { viewer, workspace: { ...ref, pnlSpreadsheetId: data?.pnl_spreadsheet_id ?? null }, workspaces };
+  const ctx = await loadCtx();
+  if (opts.owner && ctx.workspace.role !== "owner") throw new Error("Réservé au propriétaire de l'espace");
+  return ctx;
 }
 
 // ---------- Clés de l'espace ----------
@@ -89,7 +110,7 @@ export interface Credentials {
   anthropic: string | null;
 }
 
-export async function getCredentials(workspaceId: string): Promise<Credentials> {
+export const getCredentials = cache(async (workspaceId: string): Promise<Credentials> => {
   if (workspaceId === "demo") return { meta: null, trendtrack: null, anthropic: null };
   const { data } = await supabaseAdmin()
     .from("workspace_secrets")
@@ -101,7 +122,7 @@ export async function getCredentials(workspaceId: string): Promise<Credentials> 
     trendtrack: decrypt(data?.trendtrack_key),
     anthropic: decrypt(data?.anthropic_key),
   };
-}
+});
 
 /** Ce que l'interface peut voir des clés : présence, 4 derniers caractères, lisibilité. */
 export async function credentialStatus(workspaceId: string) {

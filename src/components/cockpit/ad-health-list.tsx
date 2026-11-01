@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import clsx from "clsx";
 import { FileText, Film, ImageIcon } from "lucide-react";
 import type { AdView } from "@/lib/data/views";
@@ -11,6 +10,7 @@ import { roasCeiling, zoneOf } from "@/lib/zones";
 import { Stamp, VERDICT_STYLE } from "@/components/ui";
 import { Delta, RoasGauge, Sparkline } from "@/components/charts/mini";
 import { AdDrawer } from "@/components/ad-drawer";
+import { useAdParam } from "./url-state";
 
 const PRIORITY: VerdictCode[] = ["cut", "iterate", "watch", "keep", "wait"];
 const ROLE: Record<string, string> = {
@@ -37,10 +37,8 @@ export function AdHealthList({ ads, thresholds: t, shopSlug, campaignId, windowD
 }) {
   const [filter, setFilter] = useState<VerdictCode | "all">("all");
   const [sort, setSort] = useState<Sort>("priority");
-  const params = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
-  const open = ads.find((a) => a.id === params.get("ad")) ?? null;
+  const [openId, setAd] = useAdParam();
+  const open = ads.find((a) => a.id === openId) ?? null;
   const ceil = t ? roasCeiling(t, ads.map((a) => a.totals.roas)) : 0;
   const maxShare = Math.max(0.01, ...ads.map((a) => a.share));
 
@@ -61,13 +59,6 @@ export function AdHealthList({ ads, thresholds: t, shopSlug, campaignId, windowD
           : rank(a) - rank(b) || b.totals.spend - a.totals.spend,
     );
   }, [ads, filter, sort]);
-
-  const setAd = (id: string | null) => {
-    const next = new URLSearchParams(params);
-    if (id) next.set("ad", id);
-    else next.delete("ad");
-    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
-  };
 
   return (
     <div>

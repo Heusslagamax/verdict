@@ -20,7 +20,7 @@ export default async function AdminPage() {
   const ctx = { viewer, workspace: current ? { ...current, pnlSpreadsheetId: null } : null, workspaces: mine };
 
   return (
-    <Shell ctx={ctx} shops={shops} current={null} tab="admin">
+    <Shell ctx={ctx} shops={shops.map((s) => ({ slug: s.slug, name: s.name }))}>
       <p className="eyebrow">Plateforme</p>
       <h1 className="mt-1 text-[28px] font-semibold tracking-[-0.03em]">Admin</h1>
       <p className="mt-1 text-[13px] text-chalk-3">

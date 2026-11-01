@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
       if (creds.anthropic) {
         r.ai = await runAiMatches(shop, creds);
         try {
-          const [cockpit, radar] = await Promise.all([buildCockpit(workspace, shop.slug, "3d"), buildRadar(workspace, shop.slug)]);
+          const [cockpit, radar] = await Promise.all([buildCockpit(workspace, shop.slug, "3d", new Date(), { blockOnStaleMeta: true }), buildRadar(workspace, shop.slug)]);
           if (cockpit) {
             await repo.saveBrief(shop, await writeMorningBrief(creds.anthropic, briefPayload(cockpit, radar)), null);
             r.brief = "ok";

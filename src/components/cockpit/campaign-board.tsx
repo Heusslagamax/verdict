@@ -34,7 +34,6 @@ export function CampaignBoard({
   const wd = WINDOW_DAYS[window];
   const wl = WINDOW_LABEL[window].toLowerCase();
   const zone = t ? zoneOf(c.totals.roas, t) : null;
-  const href = (id: string) => `/${shopSlug}?w=${window}&ad=${id}`;
   const pnlByDate = new Map((pnl?.days ?? []).map((d) => [d.date, d.roas]));
   const showPnl = Boolean(pnl && !pnl.error && pnl.days.some((d) => d.roas != null));
 
@@ -62,7 +61,7 @@ export function CampaignBoard({
   const budgetUse = c.dailyBudget ? c.totals.spend / (c.dailyBudget * wd) : null;
 
   return (
-    <section className="rise space-y-4" aria-labelledby={`c-${c.id}`}>
+    <section className="space-y-4" aria-labelledby={`c-${c.id}`}>
       <header className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h2 id={`c-${c.id}`} className="truncate text-[19px] font-semibold tracking-[-0.02em]">
           {c.name}
@@ -197,7 +196,7 @@ export function CampaignBoard({
         <div className="rounded-[var(--radius-l)] border border-rule-1 bg-ink-1 p-5">
           <h3 className="text-[15px] font-semibold">À faire aujourd&apos;hui</h3>
           <p className="mb-4 mt-0.5 text-[12px] text-chalk-3">Les verdicts du moteur, les plus urgents d&apos;abord. Clique une pub pour la voir.</p>
-          <TodoList ads={ads} href={href} />
+          <TodoList ads={ads} />
         </div>
         <div className="rounded-[var(--radius-l)] border border-rule-1 bg-ink-1 p-5">
           <h3 className="text-[15px] font-semibold">

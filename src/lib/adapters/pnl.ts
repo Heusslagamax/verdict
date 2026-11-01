@@ -38,14 +38,19 @@ function colIndex(letter: string): number {
     .reduce((acc, ch) => acc * 26 + (ch.charCodeAt(0) - 64), 0) - 1;
 }
 
+// Un seul client par instance : google-auth-library garde le jeton d'accès (1 h) en mémoire.
+let jwtClient: JWT | null = null;
+
 async function token(): Promise<string> {
-  const creds = JSON.parse(env.googleServiceAccountJson) as { client_email: string; private_key: string };
-  const jwt = new JWT({
-    email: creds.client_email,
-    key: creds.private_key,
-    scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
-  });
-  const { token: t } = await jwt.getAccessToken();
+  if (!jwtClient) {
+    const creds = JSON.parse(env.googleServiceAccountJson) as { client_email: string; private_key: string };
+    jwtClient = new JWT({
+      email: creds.client_email,
+      key: creds.private_key,
+      scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
+    });
+  }
+  const { token: t } = await jwtClient.getAccessToken();
   if (!t) throw new Error("Jeton Google indisponible");
   return t;
 }

@@ -1,4 +1,7 @@
+"use client";
+
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import type { ReactNode } from "react";
 import { Gauge, Radar, Settings2, ShieldCheck, Sparkles, LogOut } from "lucide-react";
@@ -13,21 +16,23 @@ const ICONS = { cockpit: Gauge, radar: Radar, brief: Sparkles, reglages: Setting
 /**
  * Coque. Sur grand écran, une barre latérale d'instruments : l'espace, ses boutiques, les
  * écrans, le compte. Sur téléphone et tablette, une barre compacte en haut.
+ * Rendue une seule fois dans la mise en page : elle reste en place pendant la navigation,
+ * l'écran et la boutique actifs se déduisent de l'adresse.
  */
 export function Shell({
   ctx,
   shops,
-  current,
-  tab,
   children,
 }: {
   ctx: Pick<Ctx, "viewer" | "workspaces"> & { workspace: Ctx["workspace"] | null };
   shops: { slug: string; name: string }[];
-  current: string | null;
-  tab: Tab;
   children: ReactNode;
 }) {
   const { viewer, workspace, workspaces } = ctx;
+  const parts = usePathname().split("/").filter(Boolean);
+  const current = shops.some((s) => s.slug === parts[0]) ? parts[0] : null;
+  const tab: Tab =
+    parts[0] === "reglages" ? "reglages" : parts[0] === "admin" ? "admin" : parts[1] === "radar" ? "radar" : parts[1] === "brief" ? "brief" : "cockpit";
   const shopHref = (slug: string) => (tab === "radar" || tab === "brief" ? `/${slug}/${tab}` : `/${slug}`);
   const base = current ?? shops[0]?.slug ?? null;
   const tabs: { id: Tab; label: string; href: string }[] = [
@@ -64,6 +69,7 @@ export function Shell({
               <li key={s.slug}>
                 <Link
                   href={shopHref(s.slug)}
+                  prefetch
                   aria-current={s.slug === current ? "page" : undefined}
                   className={clsx(
                     "press flex h-9 items-center gap-2.5 rounded-[8px] px-2 text-[13px]",
@@ -97,6 +103,7 @@ export function Shell({
                 <li key={t.id}>
                   <Link
                     href={t.href}
+                    prefetch
                     aria-current={on ? "page" : undefined}
                     className={clsx(
                       "press relative flex h-9 items-center gap-2.5 rounded-[8px] px-2 text-[13px]",
@@ -143,6 +150,7 @@ export function Shell({
                 <Link
                   key={s.slug}
                   href={shopHref(s.slug)}
+                  prefetch
                   aria-current={s.slug === current ? "page" : undefined}
                   className={clsx(
                     "press shrink-0 whitespace-nowrap rounded-[7px] px-2.5 py-1.5 text-[13px]",
@@ -172,6 +180,7 @@ export function Shell({
               <Link
                 key={t.id}
                 href={t.href}
+                    prefetch
                 aria-current={t.id === tab ? "page" : undefined}
                 className={clsx(
                   "flex shrink-0 items-center gap-1.5 rounded-[7px] px-3 py-2 text-[13px]",

@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Thresholds, VerdictCode } from "@/lib/types";
 import { eur, pct, roas as fmtRoas } from "@/lib/format";
 import { ZONES, zoneBounds, roasCeiling } from "@/lib/zones";
 import { VERDICT_STYLE } from "@/components/ui";
 import { ticks, useWidth } from "./shared";
+import { useAdParam } from "@/components/cockpit/url-state";
 
 export interface MatrixAd {
   id: string;
@@ -31,9 +31,7 @@ const MIDFIELD = 0.3;
 export function DecisionMatrix({ ads, t }: { ads: MatrixAd[]; t: Thresholds }) {
   const [ref, width] = useWidth<HTMLDivElement>();
   const [hover, setHover] = useState<string | null>(null);
-  const params = useSearchParams();
-  const router = useRouter();
-  const pathname = usePathname();
+  const [, open] = useAdParam();
 
   const plotted = ads.filter((a) => a.spend > 0);
   const silent = ads.length - plotted.length;
@@ -46,12 +44,6 @@ export function DecisionMatrix({ ads, t }: { ads: MatrixAd[]; t: Thresholds }) {
   const PAD = 12;
   const y = (r: number) => M.top + plotH - PAD - (Math.min(r, ceil) / ceil) * (plotH - PAD);
   const lowLabel = Math.min(y(t.be) + 16, M.top + plotH - 6);
-
-  const open = (id: string) => {
-    const next = new URLSearchParams(params);
-    next.set("ad", id);
-    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
-  };
 
   // Étiquettes directes, sélectives : les plus grosses parts et les pubs à couper, sans chevauchement.
   const boxes: { x0: number; x1: number; y0: number; y1: number }[] = [];

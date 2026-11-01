@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import * as z from "zod";
 import { demoMode } from "@/lib/env";
 import * as repo from "@/lib/data/repo";
-import { runAiMatches, syncCompetitors, syncMeta } from "@/lib/data/sync";
+import { metaIsStale, runAiMatches, syncCompetitors, syncMeta } from "@/lib/data/sync";
 import { briefPayload, buildCockpit, buildRadar } from "@/lib/data/views";
 import { verifyAnthropicKey, writeMorningBrief } from "@/lib/adapters/ai";
 import { lookup, verifyTrendtrackKey } from "@/lib/adapters/trendtrack";
@@ -46,6 +46,19 @@ export async function switchWorkspace(workspaceId: string) {
 }
 
 // ---------- Synchronisations ----------
+/**
+ * Lancée par le navigateur quand la page s'est affichée avec une photo Meta périmée :
+ * resynchronise en arrière-plan, puis la page se rafraîchit sans bloquer l'affichage.
+ */
+export async function syncMetaIfStale(slug: string): Promise<{ updated: boolean; error: string | null }> {
+  const { workspace } = await requireWorkspace();
+  if (demoMode) return { updated: false, error: null };
+  const shop = await shopOrThrow(workspace.id, slug);
+  const snap = await repo.readMetaSnapshot(shop, new Date());
+  if (!metaIsStale(snap?.fetchedAt)) return { updated: false, error: null };
+  const r = await syncMeta(shop, await getCredentials(workspace.id));
+  return { updated: r.ok, error: r.ok ? null : r.detail };
+}
 export async function refreshMeta(slug: string): Promise<ActionResult> {
   const { workspace } = await requireWorkspace();
   if (demoMode) return DEMO;
@@ -95,7 +108,7 @@ export async function generateBrief(slug: string): Promise<ActionResult> {
   const creds = await getCredentials(workspace.id);
   if (!creds.anthropic) return { ok: false, message: "Ajoute ta clé Anthropic dans Réglages → Connexions." };
   const shop = await shopOrThrow(workspace.id, slug);
-  const [cockpit, radar] = await Promise.all([buildCockpit(workspace, slug, "3d"), buildRadar(workspace, slug)]);
+  const [cockpit, radar] = await Promise.all([buildCockpit(workspace, slug, "3d", new Date(), { blockOnStaleMeta: true }), buildRadar(workspace, slug)]);
   if (!cockpit) return { ok: false, message: "Cockpit indisponible" };
   try {
     const brief = await writeMorningBrief(creds.anthropic, briefPayload(cockpit, radar));
