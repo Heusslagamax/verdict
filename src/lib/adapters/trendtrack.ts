@@ -19,20 +19,45 @@ const lastCredits = new Map<string, number>();
 /** Crédits restants vus au dernier appel fait avec cette clé. */
 export const trendtrackCredits = (key: string) => lastCredits.get(key.slice(-8)) ?? null;
 
-async function tt<T>(key: string, path: string, params: Record<string, string | number>): Promise<T> {
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Un appel à la fois par clé : l'API publique limite les requêtes simultanées
+ * (erreur 429 « concurrency_limited »). En cas de 429, on attend le délai indiqué par
+ * `retry-after` (sinon 2 s, 4 s, 8 s) et on réessaie, 3 fois au plus.
+ */
+const queues = new Map<string, Promise<unknown>>();
+
+function tt<T>(key: string, path: string, params: Record<string, string | number>): Promise<T> {
+  const id = key.slice(-8);
+  const run = (queues.get(id) ?? Promise.resolve()).catch(() => undefined).then(() => request<T>(key, path, params));
+  queues.set(id, run);
+  return run;
+}
+
+async function request<T>(key: string, path: string, params: Record<string, string | number>): Promise<T> {
   const url = new URL(path, BASE);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
-    cache: "no-store",
-  });
-  const remaining = res.headers.get("x-credits-remaining");
-  if (remaining != null) lastCredits.set(key.slice(-8), Number(remaining));
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`TrendTrack ${res.status} sur ${path} : ${text.slice(0, 200)}`);
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
+      cache: "no-store",
+    });
+    const remaining = res.headers.get("x-credits-remaining");
+    if (remaining != null) lastCredits.set(key.slice(-8), Number(remaining));
+    if (res.status === 429 && attempt < 3) {
+      const retryAfter = Number(res.headers.get("retry-after"));
+      await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter, 30) * 1000 : 2000 * 2 ** attempt);
+      continue;
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      if (res.status === 429) throw new Error("TrendTrack limite les appels simultanés : réessaie dans une minute.");
+      if (res.status === 401 || res.status === 403) throw new Error("Clé TrendTrack refusée : vérifie-la dans Réglages → Connexions.");
+      throw new Error(`TrendTrack ${res.status} sur ${path} : ${text.slice(0, 200)}`);
+    }
+    return (await res.json()) as T;
   }
-  return (await res.json()) as T;
 }
 
 type Row = Record<string, unknown>;
@@ -108,11 +133,15 @@ export async function lookup(key: string, q: string): Promise<Row[]> {
 
 /** Récupère la photo du jour d'un concurrent (≈ 3 appels, ~2,5 × TRENDTRACK_ROWS crédits). */
 export async function snapshotCompetitor(key: string, brandtrackerId: string, competitorId: string): Promise<CompetitorAd[]> {
-  const [top, movers, recent] = await Promise.all([
-    fetchTopAds(key, brandtrackerId, { sortBy: "currentRank", status: "active" }),
-    fetchTopAds(key, brandtrackerId, { sortBy: "rankDelta7d", status: "active" }),
-    fetchTopAds(key, brandtrackerId, { sortBy: "currentRank", status: "inactive", period: "last7d", limit: Math.ceil(env.trendtrackRows / 2) }),
-  ]);
+  // Appels l'un après l'autre (voir tt) : top actuel, plus fortes montées, coupées récemment.
+  const top = await fetchTopAds(key, brandtrackerId, { sortBy: "currentRank", status: "active" });
+  const movers = await fetchTopAds(key, brandtrackerId, { sortBy: "rankDelta7d", status: "active" });
+  const recent = await fetchTopAds(key, brandtrackerId, {
+    sortBy: "currentRank",
+    status: "inactive",
+    period: "last7d",
+    limit: Math.ceil(env.trendtrackRows / 2),
+  });
   let transcripts = new Map<string, string>();
   try {
     transcripts = await fetchTranscripts(key, brandtrackerId, Math.ceil(env.trendtrackRows / 2));
