@@ -241,6 +241,15 @@ export async function writeMetaSnapshot(shop: Shop, snap: MetaSnapshot) {
   }
 }
 
+/** Efface la photo Meta d'une boutique (changement de compte publicitaire). */
+export async function clearMetaData(shopId: string) {
+  if (demoMode || shopId.startsWith("demo")) return;
+  const db = supabaseAdmin();
+  const [a, b] = await Promise.all([db.from("meta_snapshots").delete().eq("shop_id", shopId), db.from("meta_ad_days").delete().eq("shop_id", shopId)]);
+  if (a.error) throw a.error;
+  if (b.error) throw b.error;
+}
+
 export async function readScripts(shop: Shop): Promise<Map<string, string>> {
   if (demoMode || shop.id.startsWith("demo")) return new Map();
   const { data, error } = await supabaseAdmin().from("ad_scripts").select("ad_id,script").eq("shop_id", shop.id);

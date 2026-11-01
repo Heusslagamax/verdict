@@ -45,6 +45,13 @@ export async function switchWorkspace(workspaceId: string) {
   redirect("/");
 }
 
+/** Un compte publicitaire n'appartient qu'à une boutique : sinon deux boutiques afficheraient les mêmes pubs. */
+async function accountTakenBy(wsId: string, account: string | null, exceptShopId: string | null): Promise<string | null> {
+  if (!account) return null;
+  const other = (await repo.listShops(wsId)).find((s) => s.metaAdAccountId === account && s.id !== exceptShopId);
+  return other?.name ?? null;
+}
+
 // ---------- Synchronisations ----------
 /**
  * Lancée par le navigateur quand la page s'est affichée avec une photo Meta périmée :
@@ -152,11 +159,12 @@ export async function saveShopSettings(
     if (thresholds && !(thresholds.loss20 < thresholds.be && thresholds.be < thresholds.targetLow && thresholds.targetLow <= thresholds.target)) {
       return { ok: false, message: "Seuils incohérents : il faut −20 % < BE < bas de range ≤ target." };
     }
-    await repo.updateShopSettings(workspace.id, shop.id, {
-      thresholds,
-      pnl: input.pnl ? PnlInput.parse(input.pnl) : null,
-      meta_ad_account_id: input.metaAdAccountId ? AccountId.parse(input.metaAdAccountId) : null,
-    });
+    const account = input.metaAdAccountId ? AccountId.parse(input.metaAdAccountId) : null;
+    const taken = await accountTakenBy(workspace.id, account, shop.id);
+    if (taken) return { ok: false, message: `Ce compte publicitaire est déjà branché sur ${taken}. Choisis le compte de ${shop.name}.` };
+    await repo.updateShopSettings(workspace.id, shop.id, { thresholds, pnl: input.pnl ? PnlInput.parse(input.pnl) : null, meta_ad_account_id: account });
+    // Compte changé : on efface les pubs de l'ancien compte, la prochaine ouverture recharge les bonnes.
+    if (account !== shop.metaAdAccountId) await repo.clearMetaData(shop.id);
   } catch (e) {
     return { ok: false, message: e instanceof z.ZodError ? e.issues[0].message : errMsg(e) };
   }
@@ -171,6 +179,8 @@ export async function createShopAction(input: { name: string; market: string; me
     const name = z.string().trim().min(1, "Donne un nom à la boutique").max(60).parse(input.name);
     const market = z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/, "Marché : code pays sur 2 lettres (IT, FR…)").parse(input.market);
     const account = input.metaAdAccountId ? AccountId.parse(input.metaAdAccountId) : null;
+    const taken = await accountTakenBy(workspace.id, account, null);
+    if (taken) return { ok: false, message: `Ce compte publicitaire est déjà branché sur ${taken}.` };
     await repo.createShop(workspace.id, { name, market, metaAdAccountId: account });
   } catch (e) {
     return { ok: false, message: e instanceof z.ZodError ? e.issues[0].message : errMsg(e) };
