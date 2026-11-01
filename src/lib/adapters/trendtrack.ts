@@ -15,18 +15,19 @@ export interface TrendtrackUsage {
   creditsRemaining: number | null;
 }
 
-let lastCredits: number | null = null;
-export const trendtrackCredits = () => lastCredits;
+const lastCredits = new Map<string, number>();
+/** Crédits restants vus au dernier appel fait avec cette clé. */
+export const trendtrackCredits = (key: string) => lastCredits.get(key.slice(-8)) ?? null;
 
-async function tt<T>(path: string, params: Record<string, string | number>): Promise<T> {
+async function tt<T>(key: string, path: string, params: Record<string, string | number>): Promise<T> {
   const url = new URL(path, BASE);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${env.trendtrackKey}`, Accept: "application/json" },
+    headers: { Authorization: `Bearer ${key}`, Accept: "application/json" },
     cache: "no-store",
   });
   const remaining = res.headers.get("x-credits-remaining");
-  if (remaining != null) lastCredits = Number(remaining);
+  if (remaining != null) lastCredits.set(key.slice(-8), Number(remaining));
   if (!res.ok) {
     const text = await res.text();
     throw new Error(`TrendTrack ${res.status} sur ${path} : ${text.slice(0, 200)}`);
@@ -70,10 +71,11 @@ export function normalizeTopAdRow(row: Row, competitorId: string): CompetitorAd 
 }
 
 export async function fetchTopAds(
+  key: string,
   brandtrackerId: string,
   opts: { sortBy: "currentRank" | "rankDelta7d" | "reachDelta7d"; status: "active" | "inactive"; period?: string; limit?: number },
 ): Promise<{ rows: Row[] }> {
-  const json = await tt<{ data?: Row[] }>(`/v1/brandtrackers/${brandtrackerId}/top-ads`, {
+  const json = await tt<{ data?: Row[] }>(key, `/v1/brandtrackers/${brandtrackerId}/top-ads`, {
     sortBy: opts.sortBy,
     status: opts.status,
     ...(opts.period ? { period: opts.period } : {}),
@@ -82,8 +84,8 @@ export async function fetchTopAds(
   return { rows: json.data ?? [] };
 }
 
-export async function fetchTranscripts(brandtrackerId: string, limit = 10): Promise<Map<string, string>> {
-  const json = await tt<{ data?: Row[] }>(`/v1/brandtrackers/${brandtrackerId}/transcripts`, {
+export async function fetchTranscripts(key: string, brandtrackerId: string, limit = 10): Promise<Map<string, string>> {
+  const json = await tt<{ data?: Row[] }>(key, `/v1/brandtrackers/${brandtrackerId}/transcripts`, {
     timePeriod: "last30d",
     sortBy: "totalImpressions",
     order: "desc",
@@ -99,21 +101,21 @@ export async function fetchTranscripts(brandtrackerId: string, limit = 10): Prom
 }
 
 /** Résolution gratuite (0 crédit) d'une marque, d'un domaine ou d'une page en brandtracker. */
-export async function lookup(q: string): Promise<Row[]> {
-  const json = await tt<{ data?: Row[] }>("/v1/lookup", { q, type: "brandtracker" });
+export async function lookup(key: string, q: string): Promise<Row[]> {
+  const json = await tt<{ data?: Row[] }>(key, "/v1/lookup", { q, type: "brandtracker" });
   return json.data ?? [];
 }
 
 /** Récupère la photo du jour d'un concurrent (≈ 3 appels, ~2,5 × TRENDTRACK_ROWS crédits). */
-export async function snapshotCompetitor(brandtrackerId: string, competitorId: string): Promise<CompetitorAd[]> {
+export async function snapshotCompetitor(key: string, brandtrackerId: string, competitorId: string): Promise<CompetitorAd[]> {
   const [top, movers, recent] = await Promise.all([
-    fetchTopAds(brandtrackerId, { sortBy: "currentRank", status: "active" }),
-    fetchTopAds(brandtrackerId, { sortBy: "rankDelta7d", status: "active" }),
-    fetchTopAds(brandtrackerId, { sortBy: "currentRank", status: "inactive", period: "last7d", limit: Math.ceil(env.trendtrackRows / 2) }),
+    fetchTopAds(key, brandtrackerId, { sortBy: "currentRank", status: "active" }),
+    fetchTopAds(key, brandtrackerId, { sortBy: "rankDelta7d", status: "active" }),
+    fetchTopAds(key, brandtrackerId, { sortBy: "currentRank", status: "inactive", period: "last7d", limit: Math.ceil(env.trendtrackRows / 2) }),
   ]);
   let transcripts = new Map<string, string>();
   try {
-    transcripts = await fetchTranscripts(brandtrackerId, Math.ceil(env.trendtrackRows / 2));
+    transcripts = await fetchTranscripts(key, brandtrackerId, Math.ceil(env.trendtrackRows / 2));
   } catch {
     // Les transcriptions sont un bonus : on ne bloque pas la photo du jour.
   }
@@ -125,4 +127,10 @@ export async function snapshotCompetitor(brandtrackerId: string, competitorId: s
     byId.set(ad.id, { ...byId.get(ad.id), ...ad });
   }
   return [...byId.values()];
+}
+
+/** Vérifie une clé (route gratuite /v1/me) et renvoie l'espace TrendTrack lié. */
+export async function verifyTrendtrackKey(key: string): Promise<{ workspace: string | null }> {
+  const json = await tt<Row>(key, "/v1/me", {});
+  return { workspace: str(get(json, "workspace.name")) ?? str(get(json, "data.workspace.name")) ?? str(get(json, "name")) };
 }

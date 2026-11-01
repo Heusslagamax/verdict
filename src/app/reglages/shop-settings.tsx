@@ -5,7 +5,8 @@ import { Trash2 } from "lucide-react";
 import type { Shop, Thresholds } from "@/lib/types";
 import { thresholdsFromInputs } from "@/lib/engine/metrics";
 import { roas as fr } from "@/lib/format";
-import { addCompetitorAction, removeCompetitorAction, saveShopSettings, type ActionResult } from "@/app/actions";
+import { addCompetitorAction, deleteShopAction, removeCompetitorAction, saveShopSettings, type ActionResult } from "@/app/actions";
+import type { MetaAccount } from "@/lib/adapters/meta";
 import { Panel } from "@/components/ui";
 
 const FIELDS: { key: keyof Thresholds; label: string; hint: string }[] = [
@@ -23,7 +24,18 @@ const toNum = (s: string) => {
   return Number.isFinite(n) && s.trim() !== "" ? n : null;
 };
 
-export function ShopSettings({ shop, competitors }: { shop: Shop; competitors: { id: string; name: string; brandtrackerId: string }[] }) {
+export function ShopSettings({
+  shop,
+  competitors,
+  accounts,
+  isOwner,
+}: {
+  shop: Shop;
+  competitors: { id: string; name: string; brandtrackerId: string }[];
+  /** Comptes pub lisibles avec le jeton Meta de l'espace (vide si pas de jeton). */
+  accounts: MetaAccount[];
+  isOwner: boolean;
+}) {
   const [t, setT] = useState<Record<string, string>>(() =>
     Object.fromEntries(FIELDS.map((f) => [f.key, shop.thresholds?.[f.key] != null ? String(shop.thresholds[f.key]).replace(".", ",") : ""])),
   );
@@ -93,7 +105,22 @@ export function ShopSettings({ shop, competitors }: { shop: Shop; competitors: {
     <Panel className="p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-[17px] font-semibold">{shop.name}</h2>
-        <span className="text-[12px] text-chalk-3">Marché {shop.market}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-[12px] text-chalk-3">Marché {shop.market}</span>
+          {isOwner ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (confirm(`Supprimer la boutique ${shop.name} et tout son historique dans Verdict ? Rien n'est supprimé chez Meta.`)) {
+                  run(() => deleteShopAction(shop.slug));
+                }
+              }}
+              className="press rounded-[7px] px-2 py-1 text-[12px] text-chalk-3 hover:bg-ink-3 hover:text-cut"
+            >
+              Supprimer
+            </button>
+          ) : null}
+        </div>
       </div>
 
       <section className="mt-5">
@@ -152,12 +179,32 @@ export function ShopSettings({ shop, competitors }: { shop: Shop; competitors: {
       <section className="mt-6 grid gap-5 lg:grid-cols-2">
         <div>
           <h3 className="text-[13px] font-medium text-chalk-2">Compte publicitaire Meta</h3>
-          <input
-            value={account}
-            onChange={(e) => setAccount(e.target.value)}
-            placeholder="1234567890"
-            className="num mt-2 h-10 w-full rounded-[var(--radius-m)] border border-rule-2 bg-ink-well px-2.5 text-[14px] focus:border-rule-3 focus:outline-none"
-          />
+          {accounts.length ? (
+            <select
+              value={account}
+              onChange={(e) => setAccount(e.target.value)}
+              className="mt-2 h-10 w-full rounded-[var(--radius-m)] border border-rule-2 bg-ink-well px-2.5 text-[14px] focus:border-rule-3 focus:outline-none"
+            >
+              <option value="">Choisir un compte…</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name} · {a.id}
+                  {a.active ? "" : " (inactif)"}
+                </option>
+              ))}
+              {account && !accounts.some((a) => a.id === account) ? <option value={account}>{account} (non lisible avec ce jeton)</option> : null}
+            </select>
+          ) : (
+            <input
+              value={account}
+              onChange={(e) => setAccount(e.target.value)}
+              placeholder="1234567890"
+              className="num mt-2 h-10 w-full rounded-[var(--radius-m)] border border-rule-2 bg-ink-well px-2.5 text-[14px] focus:border-rule-3 focus:outline-none"
+            />
+          )}
+          <p className="mt-1 text-[11px] text-chalk-3">
+            {accounts.length ? "Comptes que ton jeton Meta peut lire." : "Ajoute ton jeton Meta dans Connexions pour choisir dans la liste."}
+          </p>
         </div>
         <div>
           <h3 className="text-[13px] font-medium text-chalk-2">Colonnes du DAILY REPORT</h3>

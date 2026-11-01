@@ -12,7 +12,7 @@ import { env } from "@/lib/env";
  * rester dans la méthode Zecom. Les décisions chiffrées restent celles du moteur.
  */
 
-const client = () => new Anthropic({ apiKey: env.anthropicKey });
+const client = (apiKey: string) => new Anthropic({ apiKey });
 
 export const ScriptMatch = z.object({
   verdict: z.enum(["doublon", "iteration", "nouveau"]),
@@ -23,14 +23,14 @@ export const ScriptMatch = z.object({
 });
 export type ScriptMatch = z.infer<typeof ScriptMatch>;
 
-export async function compareScript(input: {
+export async function compareScript(apiKey: string, input: {
   competitorScript: string;
   ownScripts: { name: string; text: string }[];
 }): Promise<ScriptMatch> {
   const owned = input.ownScripts.length
     ? input.ownScripts.map((s, i) => `### ${i + 1}. ${s.name}\n${s.text.slice(0, 1500)}`).join("\n\n")
     : "(aucun script enregistré)";
-  const msg = await client().messages.parse({
+  const msg = await client(apiKey).messages.parse({
     model: env.anthropicModel,
     max_tokens: 1200,
     system:
@@ -58,8 +58,8 @@ export const MorningBrief = z.object({
 });
 export type MorningBrief = z.infer<typeof MorningBrief>;
 
-export async function writeMorningBrief(payload: unknown): Promise<MorningBrief> {
-  const msg = await client().messages.parse({
+export async function writeMorningBrief(apiKey: string, payload: unknown): Promise<MorningBrief> {
+  const msg = await client(apiKey).messages.parse({
     model: env.anthropicModel,
     max_tokens: 2000,
     system:
@@ -81,4 +81,9 @@ export async function writeMorningBrief(payload: unknown): Promise<MorningBrief>
   });
   if (!msg.parsed_output) throw new Error("Réponse IA illisible");
   return msg.parsed_output;
+}
+
+/** Vérifie une clé sans consommer de jetons (liste des modèles). */
+export async function verifyAnthropicKey(apiKey: string): Promise<void> {
+  await client(apiKey).models.list({ limit: 1 });
 }

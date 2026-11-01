@@ -7,13 +7,16 @@ import type { MorningBrief } from "@/lib/adapters/ai";
 import { demoCompetitorAds, demoCompetitors, demoMeta, demoShops } from "./demo";
 
 /**
- * Accès aux tables. Appelé uniquement après requireViewer() (pages, actions) ou depuis la
- * tâche planifiée protégée par CRON_SECRET : la clé secrète est donc utilisée côté serveur
- * seulement, derrière une vérification d'appartenance.
+ * Accès aux tables. Toujours appelé avec un espace déjà vérifié (lib/workspace.ts) ou depuis
+ * la tâche planifiée protégée par CRON_SECRET. Chaque lecture et écriture est filtrée sur cet
+ * espace : un identifiant venu du navigateur n'est jamais utilisé sans ce contrôle.
  */
+
+const isDemo = (wsId: string) => demoMode || wsId === "demo";
 
 interface ShopRow {
   id: string;
+  workspace_id: string;
   slug: string;
   name: string;
   market: string;
@@ -32,21 +35,161 @@ const toShop = (r: ShopRow): Shop => ({
   pnl: r.pnl,
 });
 
-export async function listShops(): Promise<Shop[]> {
-  if (demoMode) return demoShops;
-  const { data, error } = await supabaseAdmin().from("shops").select("*").order("sort");
+export async function listShops(wsId: string): Promise<Shop[]> {
+  if (isDemo(wsId)) return demoShops;
+  const { data, error } = await supabaseAdmin().from("shops").select("*").eq("workspace_id", wsId).order("sort").order("created_at");
   if (error) throw error;
   return (data as ShopRow[]).map(toShop);
 }
 
-export async function getShop(slug: string): Promise<Shop | null> {
-  const shops = await listShops();
-  return shops.find((s) => s.slug === slug) ?? null;
+export async function getShop(wsId: string, slug: string): Promise<Shop | null> {
+  return (await listShops(wsId)).find((s) => s.slug === slug) ?? null;
 }
 
-export async function updateShopSettings(shopId: string, patch: { thresholds?: Thresholds | null; pnl?: PnlMapping | null; meta_ad_account_id?: string | null; name?: string }) {
-  if (demoMode) return;
-  const { error } = await supabaseAdmin().from("shops").update(patch).eq("id", shopId);
+const slugify = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || "boutique";
+
+// Routes déjà prises par l'application : une boutique ne peut pas s'appeler ainsi.
+const RESERVED = new Set(["login", "auth", "api", "reglages", "admin", "sans-espace", "espace"]);
+
+export async function createShop(wsId: string, input: { name: string; market: string; metaAdAccountId: string | null }) {
+  if (isDemo(wsId)) return null;
+  const existing = new Set((await listShops(wsId)).map((s) => s.slug));
+  let base = slugify(input.name);
+  if (RESERVED.has(base)) base = `${base}-shop`;
+  let slug = base;
+  for (let i = 2; existing.has(slug); i++) slug = `${base}-${i}`;
+  const { data, error } = await supabaseAdmin()
+    .from("shops")
+    .insert({
+      workspace_id: wsId,
+      slug,
+      name: input.name,
+      market: input.market,
+      meta_ad_account_id: input.metaAdAccountId,
+      pnl: { dateColumn: "A", spendColumn: "", salesColumn: "", roasColumn: "" },
+      sort: existing.size,
+    })
+    .select("slug")
+    .single();
+  if (error) throw error;
+  return data.slug as string;
+}
+
+export async function deleteShop(wsId: string, shopId: string) {
+  if (isDemo(wsId)) return;
+  const { error } = await supabaseAdmin().from("shops").delete().eq("id", shopId).eq("workspace_id", wsId);
+  if (error) throw error;
+}
+
+export async function updateShopSettings(
+  wsId: string,
+  shopId: string,
+  patch: { thresholds?: Thresholds | null; pnl?: PnlMapping | null; meta_ad_account_id?: string | null; name?: string },
+) {
+  if (isDemo(wsId)) return;
+  const { error } = await supabaseAdmin().from("shops").update(patch).eq("id", shopId).eq("workspace_id", wsId);
+  if (error) throw error;
+}
+
+// ---------- Espace ----------
+export async function updateWorkspace(wsId: string, patch: { name?: string; pnl_spreadsheet_id?: string | null }) {
+  if (isDemo(wsId)) return;
+  const { error } = await supabaseAdmin().from("workspaces").update(patch).eq("id", wsId);
+  if (error) throw error;
+}
+
+export interface MemberRow {
+  userId: string;
+  email: string;
+  role: "owner" | "member";
+}
+
+export async function listMembers(wsId: string): Promise<MemberRow[]> {
+  if (isDemo(wsId)) return [{ userId: "demo", email: "demo@verdict.local", role: "owner" }];
+  const { data, error } = await supabaseAdmin()
+    .from("workspace_members")
+    .select("user_id, email, role")
+    .eq("workspace_id", wsId)
+    .order("created_at");
+  if (error) throw error;
+  return (data ?? []).map((m) => ({ userId: m.user_id, email: m.email, role: m.role }));
+}
+
+export async function listPendingInvitations(wsId: string) {
+  if (isDemo(wsId)) return [];
+  const { data, error } = await supabaseAdmin()
+    .from("invitations")
+    .select("id, email, role, created_at")
+    .eq("workspace_id", wsId)
+    .is("accepted_at", null)
+    .order("created_at");
+  if (error) throw error;
+  return data ?? [];
+}
+
+/** Invite dans un espace existant. Si la personne a déjà un compte, elle est ajoutée tout de suite. */
+export async function inviteToWorkspace(wsId: string, email: string, role: "owner" | "member", by: string) {
+  const { error } = await supabaseAdmin()
+    .from("invitations")
+    .insert({ email: email.toLowerCase(), workspace_id: wsId, role, invited_by: by });
+  if (error) throw error;
+}
+
+export async function cancelInvitation(wsId: string, invitationId: string) {
+  const { error } = await supabaseAdmin().from("invitations").delete().eq("id", invitationId).eq("workspace_id", wsId).is("accepted_at", null);
+  if (error) throw error;
+}
+
+export async function removeMember(wsId: string, userId: string) {
+  const members = await listMembers(wsId);
+  const target = members.find((m) => m.userId === userId);
+  if (!target) return;
+  if (target.role === "owner" && members.filter((m) => m.role === "owner").length <= 1) {
+    throw new Error("Impossible de retirer le dernier propriétaire de l'espace.");
+  }
+  const { error } = await supabaseAdmin().from("workspace_members").delete().eq("workspace_id", wsId).eq("user_id", userId);
+  if (error) throw error;
+}
+
+// ---------- Administration de la plateforme ----------
+export async function listAllWorkspaces() {
+  const db = supabaseAdmin();
+  const [{ data: ws }, { data: members }, { data: shops }, { data: pending }] = await Promise.all([
+    db.from("workspaces").select("id, name, created_at").order("created_at"),
+    db.from("workspace_members").select("workspace_id, email, role"),
+    db.from("shops").select("workspace_id"),
+    db.from("invitations").select("id, email, workspace_name, created_at").is("workspace_id", null).is("accepted_at", null).order("created_at"),
+  ]);
+  return {
+    workspaces: (ws ?? []).map((w) => ({
+      id: w.id as string,
+      name: w.name as string,
+      createdAt: w.created_at as string,
+      owners: (members ?? []).filter((m) => m.workspace_id === w.id && m.role === "owner").map((m) => m.email as string),
+      memberCount: (members ?? []).filter((m) => m.workspace_id === w.id).length,
+      shopCount: (shops ?? []).filter((s) => s.workspace_id === w.id).length,
+    })),
+    pending: (pending ?? []) as { id: string; email: string; workspace_name: string; created_at: string }[],
+  };
+}
+
+/** Ouvre l'accès à un nouvel e-mail : son espace sera créé à sa première connexion. */
+export async function inviteNewAccount(email: string, workspaceName: string, by: string) {
+  const { error } = await supabaseAdmin()
+    .from("invitations")
+    .insert({ email: email.toLowerCase(), workspace_name: workspaceName, role: "owner", invited_by: by });
+  if (error) throw error;
+}
+
+export async function cancelAccountInvitation(invitationId: string) {
+  const { error } = await supabaseAdmin().from("invitations").delete().eq("id", invitationId).is("workspace_id", null).is("accepted_at", null);
   if (error) throw error;
 }
 
@@ -58,7 +201,7 @@ export interface MetaSnapshot {
 }
 
 export async function readMetaSnapshot(shop: Shop, today: Date): Promise<MetaSnapshot | null> {
-  if (demoMode) return { fetchedAt: today.toISOString(), ...demoMeta(shop, today) };
+  if (demoMode || shop.id.startsWith("demo")) return { fetchedAt: today.toISOString(), ...demoMeta(shop, today) };
   const { data, error } = await supabaseAdmin().from("meta_snapshots").select("*").eq("shop_id", shop.id).maybeSingle();
   if (error) throw error;
   if (!data) return null;
@@ -95,17 +238,17 @@ export async function writeMetaSnapshot(shop: Shop, snap: MetaSnapshot) {
 }
 
 export async function readScripts(shop: Shop): Promise<Map<string, string>> {
-  if (demoMode) return new Map();
+  if (demoMode || shop.id.startsWith("demo")) return new Map();
   const { data, error } = await supabaseAdmin().from("ad_scripts").select("ad_id,script").eq("shop_id", shop.id);
   if (error) throw error;
   return new Map((data ?? []).map((r) => [r.ad_id as string, r.script as string]));
 }
 
 export async function saveScript(shop: Shop, adId: string, script: string, userId: string) {
-  if (demoMode) return;
+  if (demoMode || shop.id.startsWith("demo")) return;
   const db = supabaseAdmin();
   if (!script.trim()) {
-    await db.from("ad_scripts").delete().eq("ad_id", adId);
+    await db.from("ad_scripts").delete().eq("shop_id", shop.id).eq("ad_id", adId);
     return;
   }
   const { error } = await db
@@ -115,44 +258,44 @@ export async function saveScript(shop: Shop, adId: string, script: string, userI
 }
 
 // ---------- Concurrents ----------
+const toCompetitor = (r: { id: string; shop_id: string; name: string; brandtracker_id: string; active: boolean }): Competitor => ({
+  id: r.id,
+  shopId: r.shop_id,
+  name: r.name,
+  brandtrackerId: r.brandtracker_id,
+  active: r.active,
+});
+
 export async function listCompetitors(shop: Shop): Promise<Competitor[]> {
-  if (demoMode) return demoCompetitors(shop);
+  if (demoMode || shop.id.startsWith("demo")) return demoCompetitors(shop);
   const { data, error } = await supabaseAdmin().from("competitors").select("*").eq("shop_id", shop.id).order("created_at");
   if (error) throw error;
-  return (data ?? []).map((r) => ({ id: r.id, shopId: r.shop_id, name: r.name, brandtrackerId: r.brandtracker_id, active: r.active }));
+  return (data ?? []).map(toCompetitor);
 }
 
-export async function listAllCompetitors(): Promise<(Competitor & { shopSlug: string })[]> {
-  if (demoMode) return [];
-  const { data, error } = await supabaseAdmin().from("competitors").select("*, shops(slug)").eq("active", true);
-  if (error) throw error;
-  return (data ?? []).map((r) => ({
-    id: r.id,
-    shopId: r.shop_id,
-    name: r.name,
-    brandtrackerId: r.brandtracker_id,
-    active: r.active,
-    shopSlug: (r.shops as { slug: string } | null)?.slug ?? "",
-  }));
+/** Vérifie qu'un concurrent (identifiant venu du navigateur) appartient bien à l'espace. */
+export async function competitorInWorkspace(wsId: string, competitorId: string): Promise<boolean> {
+  if (isDemo(wsId)) return false;
+  const { data } = await supabaseAdmin().from("competitors").select("id, shops!inner(workspace_id)").eq("id", competitorId).eq("shops.workspace_id", wsId).maybeSingle();
+  return Boolean(data);
 }
 
 export async function addCompetitor(shop: Shop, name: string, brandtrackerId: string) {
-  if (demoMode) return;
-  const { error } = await supabaseAdmin().from("competitors").upsert(
-    { shop_id: shop.id, name, brandtracker_id: brandtrackerId, active: true },
-    { onConflict: "shop_id,brandtracker_id" },
-  );
+  if (demoMode || shop.id.startsWith("demo")) return;
+  const { error } = await supabaseAdmin()
+    .from("competitors")
+    .upsert({ shop_id: shop.id, name, brandtracker_id: brandtrackerId, active: true }, { onConflict: "shop_id,brandtracker_id" });
   if (error) throw error;
 }
 
-export async function removeCompetitor(competitorId: string) {
-  if (demoMode) return;
+export async function removeCompetitor(wsId: string, competitorId: string) {
+  if (!(await competitorInWorkspace(wsId, competitorId))) throw new Error("Concurrent introuvable dans cet espace");
   const { error } = await supabaseAdmin().from("competitors").delete().eq("id", competitorId);
   if (error) throw error;
 }
 
 export async function readCompetitorAds(competitors: Competitor[], today: Date): Promise<CompetitorAd[]> {
-  if (demoMode) return competitors.flatMap((c) => demoCompetitorAds(c, today));
+  if (demoMode || competitors.some((c) => c.brandtrackerId === "demo")) return competitors.flatMap((c) => demoCompetitorAds(c, today));
   if (!competitors.length) return [];
   const ids = competitors.map((c) => c.id);
   const db = supabaseAdmin();
@@ -193,8 +336,8 @@ export async function writeCompetitorAds(competitor: Competitor, ads: Competitor
   );
 }
 
-export async function setCompetitorFlag(competitorId: string, adId: string, flag: CompetitorAd["userFlag"], userId: string) {
-  if (demoMode) return;
+export async function setCompetitorFlag(wsId: string, competitorId: string, adId: string, flag: CompetitorAd["userFlag"], userId: string) {
+  if (!(await competitorInWorkspace(wsId, competitorId))) throw new Error("Concurrent introuvable dans cet espace");
   const db = supabaseAdmin();
   if (!flag) {
     await db.from("competitor_flags").delete().eq("competitor_id", competitorId).eq("ad_id", adId);
@@ -207,7 +350,7 @@ export async function setCompetitorFlag(competitorId: string, adId: string, flag
 }
 
 export async function readAiMatches(competitors: Competitor[]): Promise<Map<string, AiMatch>> {
-  if (demoMode || !competitors.length) return new Map();
+  if (demoMode || !competitors.length || competitors.some((c) => c.brandtrackerId === "demo")) return new Map();
   const { data } = await supabaseAdmin().from("ai_matches").select("*").in("competitor_id", competitors.map((c) => c.id));
   return new Map((data ?? []).map((r) => [`${r.competitor_id}:${r.ad_id}`, r.result as AiMatch]));
 }
@@ -219,7 +362,7 @@ export async function writeAiMatch(competitorId: string, adId: string, result: A
 
 // ---------- Brief & journal ----------
 export async function latestBrief(shop: Shop): Promise<{ content: MorningBrief; createdAt: string } | null> {
-  if (demoMode) return null;
+  if (demoMode || shop.id.startsWith("demo")) return null;
   const { data } = await supabaseAdmin()
     .from("briefs")
     .select("content,created_at")
@@ -236,16 +379,34 @@ export async function saveBrief(shop: Shop, content: MorningBrief, userId: strin
 }
 
 export async function logRun(source: "meta" | "trendtrack" | "ai" | "pnl", shopId: string | null, ok: boolean, detail: string, credits?: number | null) {
-  if (demoMode) return;
+  if (demoMode || !shopId || shopId.startsWith("demo")) return;
   await supabaseAdmin()
     .from("sync_runs")
     .insert({ source, shop_id: shopId, finished_at: new Date().toISOString(), ok, detail: detail.slice(0, 500), credits_left: credits ?? null });
 }
 
-export async function lastRun(source: "meta" | "trendtrack" | "ai" | "pnl", shopId: string | null) {
-  if (demoMode) return null;
-  let q = supabaseAdmin().from("sync_runs").select("*").eq("source", source).order("started_at", { ascending: false }).limit(1);
-  if (shopId) q = q.eq("shop_id", shopId);
-  const { data } = await q.maybeSingle();
+export async function lastRun(source: "meta" | "trendtrack" | "ai" | "pnl", shopId: string) {
+  if (demoMode || shopId.startsWith("demo")) return null;
+  const { data } = await supabaseAdmin()
+    .from("sync_runs")
+    .select("*")
+    .eq("source", source)
+    .eq("shop_id", shopId)
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
   return data as { started_at: string; ok: boolean; detail: string; credits_left: number | null } | null;
+}
+
+/** Pour la tâche du matin : toutes les boutiques, groupées par espace. */
+export async function listAllShopsByWorkspace(): Promise<Map<string, Shop[]>> {
+  const { data, error } = await supabaseAdmin().from("shops").select("*").order("sort");
+  if (error) throw error;
+  const out = new Map<string, Shop[]>();
+  for (const r of data as ShopRow[]) {
+    const list = out.get(r.workspace_id) ?? [];
+    list.push(toShop(r));
+    out.set(r.workspace_id, list);
+  }
+  return out;
 }

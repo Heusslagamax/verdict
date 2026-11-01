@@ -50,12 +50,15 @@ async function token(): Promise<string> {
   return t;
 }
 
-export async function fetchPnlDays(mapping: PnlMapping, today: Date): Promise<PnlDay[]> {
+export async function fetchPnlDays(spreadsheetId: string, mapping: PnlMapping, today: Date): Promise<PnlDay[]> {
   const range = encodeURIComponent(`'${env.pnlSheetName}'!A1:BZ400`);
   const res = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${env.pnlSpreadsheetId}/values/${range}`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${range}`,
     { headers: { Authorization: `Bearer ${await token()}` }, cache: "no-store" },
   );
+  if (res.status === 403 || res.status === 404) {
+    throw new Error("Fichier P&L inaccessible : partage-le en lecture avec l'adresse du compte de service (Réglages).");
+  }
   if (!res.ok) throw new Error(`Google Sheets ${res.status}`);
   const { values = [] } = (await res.json()) as { values?: string[][] };
   const year = today.getUTCFullYear();

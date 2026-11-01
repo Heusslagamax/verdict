@@ -17,10 +17,10 @@ class MetaError extends Error {
   }
 }
 
-async function graph<T>(path: string, params: Record<string, string>): Promise<T> {
+async function graph<T>(token: string, path: string, params: Record<string, string>): Promise<T> {
   const url = new URL(`https://graph.facebook.com/${env.metaGraphVersion}/${path}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  url.searchParams.set("access_token", env.metaToken);
+  url.searchParams.set("access_token", token);
   const res = await fetch(url, { cache: "no-store" });
   const json = await res.json();
   if (!res.ok || json.error) {
@@ -29,8 +29,8 @@ async function graph<T>(path: string, params: Record<string, string>): Promise<T
   return json as T;
 }
 
-async function graphAll<T>(path: string, params: Record<string, string>, maxPages = 10): Promise<T[]> {
-  const first = await graph<Paged<T>>(path, params);
+async function graphAll<T>(token: string, path: string, params: Record<string, string>, maxPages = 10): Promise<T[]> {
+  const first = await graph<Paged<T>>(token, path, params);
   const out = [...first.data];
   let next = first.paging?.next;
   let pages = 1;
@@ -87,7 +87,7 @@ function toDay(r: InsightRow): AdDay {
 const INSIGHT_FIELDS = "ad_id,campaign_id,spend,impressions,inline_link_clicks,actions,action_values";
 const LIVE_STATUSES = JSON.stringify(["ACTIVE", "PAUSED", "CAMPAIGN_PAUSED", "ADSET_PAUSED", "WITH_ISSUES", "IN_PROCESS"]);
 
-export async function fetchCampaigns(accountId: string): Promise<MetaCampaign[]> {
+export async function fetchCampaigns(token: string, accountId: string): Promise<MetaCampaign[]> {
   const [campaigns, lifetime] = await Promise.all([
     graphAll<{
       id: string;
@@ -96,12 +96,12 @@ export async function fetchCampaigns(accountId: string): Promise<MetaCampaign[]>
       daily_budget?: string;
       created_time: string;
       start_time?: string;
-    }>(`${act(accountId)}/campaigns`, {
+    }>(token, `${act(accountId)}/campaigns`, {
       fields: "id,name,effective_status,daily_budget,created_time,start_time",
       filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: ["ACTIVE", "PAUSED"] }]),
       limit: "100",
     }),
-    graphAll<InsightRow>(`${act(accountId)}/insights`, {
+    graphAll<InsightRow>(token, `${act(accountId)}/insights`, {
       level: "campaign",
       date_preset: "maximum",
       fields: INSIGHT_FIELDS,
@@ -128,7 +128,7 @@ export async function fetchCampaigns(accountId: string): Promise<MetaCampaign[]>
   });
 }
 
-export async function fetchAds(accountId: string, sinceIso: string, untilIso: string): Promise<MetaAd[]> {
+export async function fetchAds(token: string, accountId: string, sinceIso: string, untilIso: string): Promise<MetaAd[]> {
   const [ads, daily, lifetime] = await Promise.all([
     graphAll<{
       id: string;
@@ -148,7 +148,7 @@ export async function fetchAds(accountId: string, sinceIso: string, untilIso: st
         title?: string;
         object_story_spec?: { video_data?: { video_id?: string; message?: string; title?: string; image_url?: string } };
       };
-    }>(`${act(accountId)}/ads`, {
+    }>(token, `${act(accountId)}/ads`, {
       fields:
         "id,name,effective_status,created_time,adset_id,campaign_id,adset{name},campaign{name},creative{id,thumbnail_url,image_url,video_id,body,title,object_story_spec}",
       filtering: JSON.stringify([{ field: "effective_status", operator: "IN", value: JSON.parse(LIVE_STATUSES) }]),
@@ -156,14 +156,14 @@ export async function fetchAds(accountId: string, sinceIso: string, untilIso: st
       thumbnail_height: "480",
       limit: "200",
     }),
-    graphAll<InsightRow>(`${act(accountId)}/insights`, {
+    graphAll<InsightRow>(token, `${act(accountId)}/insights`, {
       level: "ad",
       time_increment: "1",
       time_range: JSON.stringify({ since: sinceIso, until: untilIso }),
       fields: `${INSIGHT_FIELDS},date_start`,
       limit: "500",
     }),
-    graphAll<InsightRow>(`${act(accountId)}/insights`, {
+    graphAll<InsightRow>(token, `${act(accountId)}/insights`, {
       level: "ad",
       date_preset: "maximum",
       fields: "ad_id,spend",
@@ -206,15 +206,34 @@ export async function fetchAds(accountId: string, sinceIso: string, untilIso: st
 }
 
 /** Aperçu officiel Meta (iframe) : rend l'ad exactement comme dans le fil. */
-export async function fetchAdPreview(adId: string, format = "MOBILE_FEED_STANDARD"): Promise<string | null> {
-  const r = await graph<{ data: { body: string }[] }>(`${adId}/previews`, { ad_format: format });
+export async function fetchAdPreview(token: string, adId: string, format = "MOBILE_FEED_STANDARD"): Promise<string | null> {
+  const r = await graph<{ data: { body: string }[] }>(token, `${adId}/previews`, { ad_format: format });
   return r.data[0]?.body ?? null;
 }
 
 /** URL source d'une vidéo (URL signée, temporaire : à ne pas stocker). */
-export async function fetchVideoSource(videoId: string): Promise<{ source: string | null; picture: string | null }> {
-  const r = await graph<{ source?: string; picture?: string }>(videoId, { fields: "source,picture" });
+export async function fetchVideoSource(token: string, videoId: string): Promise<{ source: string | null; picture: string | null }> {
+  const r = await graph<{ source?: string; picture?: string }>(token, videoId, { fields: "source,picture" });
   return { source: r.source ?? null, picture: r.picture ?? null };
+}
+
+export interface MetaAccount {
+  id: string;
+  name: string;
+  active: boolean;
+}
+
+/** Vérifie un jeton et liste les comptes publicitaires qu'il peut lire. */
+export async function verifyMetaToken(token: string): Promise<{ name: string; accounts: MetaAccount[] }> {
+  const me = await graph<{ name?: string; id: string }>(token, "me", { fields: "id,name" });
+  const accounts = await graphAll<{ account_id: string; name: string; account_status: number }>(token, "me/adaccounts", {
+    fields: "account_id,name,account_status",
+    limit: "100",
+  });
+  return {
+    name: me.name ?? me.id,
+    accounts: accounts.map((a) => ({ id: a.account_id, name: a.name, active: a.account_status === 1 })),
+  };
 }
 
 export { MetaError };

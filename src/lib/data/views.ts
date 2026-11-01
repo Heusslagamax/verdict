@@ -1,5 +1,6 @@
 import "server-only";
-import { features, demoMode } from "@/lib/env";
+import { demoMode, platform } from "@/lib/env";
+import { getCredentials, type Workspace } from "@/lib/workspace";
 import { ageInDays, sumDays, totalsFor, windowDays } from "@/lib/engine/metrics";
 import { decideCampaign, judgeAd } from "@/lib/engine/verdict";
 import { readCompetitorAd } from "@/lib/engine/competitors";
@@ -70,15 +71,16 @@ export interface CockpitView {
 
 const emptyCounts = (): CampaignView["counts"] => ({ keep: 0, iterate: 0, cut: 0, watch: 0, wait: 0 });
 
-export async function buildCockpit(slug: string, window: Window, today = new Date()): Promise<CockpitView | null> {
-  const shops = await repo.listShops();
+export async function buildCockpit(ws: Workspace, slug: string, window: Window, today = new Date()): Promise<CockpitView | null> {
+  const shops = await repo.listShops(ws.id);
   const shop = shops.find((s) => s.slug === slug);
   if (!shop) return null;
+  const creds = await getCredentials(ws.id);
 
   const [{ snap, error: syncError }, scripts, pnl] = await Promise.all([
-    ensureFreshMeta(shop, today),
+    ensureFreshMeta(shop, creds, today),
     repo.readScripts(shop),
-    loadPnl(shop, today),
+    loadPnl(ws, shop, today),
   ]);
 
   const ads: MetaAd[] = snap?.ads ?? [];
@@ -158,14 +160,20 @@ export async function buildCockpit(slug: string, window: Window, today = new Dat
     ),
     pnl,
     campaigns,
-    sources: { meta: features.meta, pnl: features.pnl && Boolean(shop.pnl), demo: demoMode },
+    sources: {
+      meta: Boolean(creds.meta && shop.metaAdAccountId),
+      pnl: Boolean(platform.googleSheets && ws.pnlSpreadsheetId && pnlReady(shop)),
+      demo: demoMode || ws.id === "demo",
+    },
   };
 }
 
-async function loadPnl(shop: Shop, today: Date) {
-  if (!features.pnl || !shop.pnl) return null;
+const pnlReady = (shop: Shop) => Boolean(shop.pnl?.spendColumn && shop.pnl?.salesColumn && shop.pnl?.roasColumn);
+
+async function loadPnl(ws: Workspace, shop: Shop, today: Date) {
+  if (!platform.googleSheets || !ws.pnlSpreadsheetId || !pnlReady(shop)) return null;
   try {
-    const days = await fetchPnlDays(shop.pnl, today);
+    const days = await fetchPnlDays(ws.pnlSpreadsheetId, shop.pnl!, today);
     return { ...pnlRoas(days, today), error: null };
   } catch (e) {
     return { roas3d: null, roasYesterday: null, error: e instanceof Error ? e.message : String(e) };
@@ -188,11 +196,11 @@ export interface RadarView {
   sources: { trendtrack: boolean; ai: boolean; demo: boolean };
 }
 
-export async function buildRadar(slug: string, today = new Date()): Promise<RadarView | null> {
-  const shops = await repo.listShops();
+export async function buildRadar(ws: Workspace, slug: string, today = new Date()): Promise<RadarView | null> {
+  const shops = await repo.listShops(ws.id);
   const shop = shops.find((s) => s.slug === slug);
   if (!shop) return null;
-  const competitors = await repo.listCompetitors(shop);
+  const [competitors, creds] = await Promise.all([repo.listCompetitors(shop), getCredentials(ws.id)]);
   const [ads, matches, owned, run] = await Promise.all([
     repo.readCompetitorAds(competitors, today),
     repo.readAiMatches(competitors),
@@ -210,7 +218,7 @@ export async function buildRadar(slug: string, today = new Date()): Promise<Rada
     competitors: competitors.map((c) => ({ ...c, adCount: views.filter((v) => v.competitorId === c.id).length })),
     ads: views,
     lastSync: run ? { at: run.started_at, ok: run.ok, detail: run.detail, credits: run.credits_left } : null,
-    sources: { trendtrack: features.trendtrack, ai: features.ai, demo: demoMode },
+    sources: { trendtrack: Boolean(creds.trendtrack), ai: Boolean(creds.anthropic), demo: demoMode || ws.id === "demo" },
   };
 }
 

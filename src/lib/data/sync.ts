@@ -1,22 +1,24 @@
 import "server-only";
-import { env, features } from "@/lib/env";
+import { env } from "@/lib/env";
 import { fetchAds, fetchCampaigns } from "@/lib/adapters/meta";
 import { snapshotCompetitor, trendtrackCredits } from "@/lib/adapters/trendtrack";
 import { compareScript } from "@/lib/adapters/ai";
 import { readCompetitorAd, type OwnScript } from "@/lib/engine/competitors";
+import type { Credentials } from "@/lib/workspace";
 import type { Shop } from "@/lib/types";
 import * as repo from "./repo";
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 /** Resynchronise Meta pour une boutique (14 jours jour par jour + cumuls depuis le lancement). */
-export async function syncMeta(shop: Shop, today = new Date()) {
-  if (!features.meta || !shop.metaAdAccountId) return { ok: false, detail: "Meta non configuré" };
+export async function syncMeta(shop: Shop, creds: Credentials, today = new Date()) {
+  if (!creds.meta) return { ok: false, detail: "Jeton Meta absent : ajoute-le dans Réglages → Connexions." };
+  if (!shop.metaAdAccountId) return { ok: false, detail: "Compte publicitaire non choisi pour cette boutique." };
   try {
     const since = iso(new Date(today.getTime() - 13 * 86_400_000));
     const [campaigns, ads] = await Promise.all([
-      fetchCampaigns(shop.metaAdAccountId),
-      fetchAds(shop.metaAdAccountId, since, iso(today)),
+      fetchCampaigns(creds.meta, shop.metaAdAccountId),
+      fetchAds(creds.meta, shop.metaAdAccountId, since, iso(today)),
     ]);
     await repo.writeMetaSnapshot(shop, { fetchedAt: new Date().toISOString(), campaigns, ads });
     await repo.logRun("meta", shop.id, true, `${campaigns.length} campagnes, ${ads.length} ads`);
@@ -29,11 +31,11 @@ export async function syncMeta(shop: Shop, today = new Date()) {
 }
 
 /** Meta « en direct » : resynchronise si la photo a plus de META_STALE_MINUTES. */
-export async function ensureFreshMeta(shop: Shop, today = new Date()) {
+export async function ensureFreshMeta(shop: Shop, creds: Credentials, today = new Date()) {
   const snap = await repo.readMetaSnapshot(shop, today);
   const age = snap ? (Date.now() - new Date(snap.fetchedAt).getTime()) / 60_000 : Infinity;
-  if (features.meta && age > env.metaStaleMinutes) {
-    const r = await syncMeta(shop, today);
+  if (creds.meta && shop.metaAdAccountId && age > env.metaStaleMinutes) {
+    const r = await syncMeta(shop, creds, today);
     if (r.ok) return { snap: await repo.readMetaSnapshot(shop, today), error: null };
     return { snap, error: r.detail };
   }
@@ -41,14 +43,14 @@ export async function ensureFreshMeta(shop: Shop, today = new Date()) {
 }
 
 /** Photo TrendTrack du jour pour chaque concurrent actif de la boutique. */
-export async function syncCompetitors(shop: Shop, today = new Date()) {
-  if (!features.trendtrack) return { ok: false, detail: "TrendTrack non configuré" };
+export async function syncCompetitors(shop: Shop, creds: Credentials, today = new Date()) {
+  if (!creds.trendtrack) return { ok: false, detail: "Clé TrendTrack absente : ajoute-la dans Réglages → Connexions." };
   const competitors = (await repo.listCompetitors(shop)).filter((c) => c.active);
   const errors: string[] = [];
   let count = 0;
   for (const c of competitors) {
     try {
-      const ads = await snapshotCompetitor(c.brandtrackerId, c.id);
+      const ads = await snapshotCompetitor(creds.trendtrack, c.brandtrackerId, c.id);
       await repo.writeCompetitorAds(c, ads, today);
       count += ads.length;
     } catch (e) {
@@ -56,7 +58,7 @@ export async function syncCompetitors(shop: Shop, today = new Date()) {
     }
   }
   const ok = errors.length === 0;
-  await repo.logRun("trendtrack", shop.id, ok, ok ? `${count} ads relevées` : errors.join(" | "), trendtrackCredits());
+  await repo.logRun("trendtrack", shop.id, ok, ok ? `${count} ads relevées` : errors.join(" | "), trendtrackCredits(creds.trendtrack));
   return { ok, detail: ok ? `${count} ads` : errors.join(" | ") };
 }
 
@@ -80,8 +82,8 @@ export async function ownScripts(shop: Shop, today: Date): Promise<OwnScript[]> 
 }
 
 /** Fait trancher l'IA sur les candidates fortes pas encore comparées (8 max par passage). */
-export async function runAiMatches(shop: Shop, today = new Date(), max = 8) {
-  if (!features.ai) return { ok: false, detail: "IA non configurée" };
+export async function runAiMatches(shop: Shop, creds: Credentials, today = new Date(), max = 8) {
+  if (!creds.anthropic) return { ok: false, detail: "Clé Anthropic absente" };
   const competitors = await repo.listCompetitors(shop);
   const [ads, matches, owned] = await Promise.all([
     repo.readCompetitorAds(competitors, today),
@@ -99,7 +101,7 @@ export async function runAiMatches(shop: Shop, today = new Date(), max = 8) {
   let done = 0;
   for (const a of candidates) {
     try {
-      const res = await compareScript({
+      const res = await compareScript(creds.anthropic, {
         competitorScript: [a.transcript, a.body].filter(Boolean).join("\n"),
         ownScripts: owned.map((o) => ({ name: o.name, text: o.text })),
       });

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import clsx from "clsx";
 import { RefreshCw } from "lucide-react";
-import { requireViewer } from "@/lib/auth";
+import { requireWorkspace } from "@/lib/workspace";
+import { listShops } from "@/lib/data/repo";
 import { buildCockpit } from "@/lib/data/views";
 import { relativeTime, WINDOW_LABEL } from "@/lib/format";
 import type { Window } from "@/lib/types";
@@ -17,12 +18,13 @@ export const metadata = { title: "Cockpit" };
 const WINDOWS: Window[] = ["1d", "3d", "7d"];
 
 export default async function CockpitPage({ params, searchParams }: PageProps<"/[shop]">) {
-  const viewer = await requireViewer();
+  const ctx = await requireWorkspace();
   const { shop: slug } = await params;
   const sp = await searchParams;
   const w = (typeof sp.w === "string" && WINDOWS.includes(sp.w as Window) ? sp.w : "7d") as Window;
-  const view = await buildCockpit(slug, w);
+  const view = await buildCockpit(ctx.workspace, slug, w);
   if (!view) notFound();
+  const shops = await listShops(ctx.workspace.id);
 
   const active = view.campaigns.filter((c) => c.status === "ACTIVE");
   const paused = view.campaigns.filter((c) => c.status !== "ACTIVE");
@@ -30,7 +32,7 @@ export default async function CockpitPage({ params, searchParams }: PageProps<"/
   const totalIterate = active.reduce((a, c) => a + c.counts.iterate, 0);
 
   return (
-    <Shell shops={view.shops} current={slug} tab="cockpit" email={viewer.email} demo={view.sources.demo}>
+    <Shell ctx={ctx} shops={shops} current={slug} tab="cockpit">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-[24px] font-semibold">{view.shop.name} · cockpit</h1>
@@ -63,7 +65,10 @@ export default async function CockpitPage({ params, searchParams }: PageProps<"/
       <div className="mt-5 space-y-3">
         {view.syncError ? <Notice tone="cut">Dernière synchronisation Meta en échec : {view.syncError}. Données affichées : dernier relevé réussi.</Notice> : null}
         {!view.sources.meta && !view.sources.demo ? (
-          <Notice tone="watch">Meta n&apos;est pas branché : ajoute META_ACCESS_TOKEN (voir le guide de déploiement).</Notice>
+          <Notice tone="watch">
+            Meta n&apos;est pas branché pour cette boutique : ajoute ton jeton dans{" "}
+            <Link href="/reglages" className="underline underline-offset-4">Réglages → Connexions</Link>, puis choisis son compte publicitaire.
+          </Notice>
         ) : null}
         {!view.thresholds ? (
           <Notice tone="watch">

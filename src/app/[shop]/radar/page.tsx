@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { Radar } from "lucide-react";
-import { requireViewer } from "@/lib/auth";
+import Link from "next/link";
+import { requireWorkspace } from "@/lib/workspace";
+import { listShops } from "@/lib/data/repo";
 import { buildRadar } from "@/lib/data/views";
 import { relativeTime } from "@/lib/format";
 import { Shell } from "@/components/shell";
@@ -12,16 +14,17 @@ import { refreshCompetitors } from "@/app/actions";
 export const metadata = { title: "Radar concurrents" };
 
 export default async function RadarPage({ params }: PageProps<"/[shop]/radar">) {
-  const viewer = await requireViewer();
+  const ctx = await requireWorkspace();
   const { shop: slug } = await params;
-  const view = await buildRadar(slug);
+  const view = await buildRadar(ctx.workspace, slug);
   if (!view) notFound();
+  const shops = await listShops(ctx.workspace.id);
 
   const recover = view.ads.filter((a) => a.read.recoverable).length;
   const cut = view.ads.filter((a) => a.read.signals.includes("coupee")).length;
 
   return (
-    <Shell shops={view.shops} current={slug} tab="radar" email={viewer.email} demo={view.sources.demo}>
+    <Shell ctx={ctx} shops={shops} current={slug} tab="radar">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-[24px] font-semibold">{view.shop.name} · radar concurrents</h1>
@@ -39,12 +42,15 @@ export default async function RadarPage({ params }: PageProps<"/[shop]/radar">) 
 
       <div className="mt-5 space-y-3">
         {!view.sources.trendtrack && !view.sources.demo ? (
-          <Notice tone="watch">TrendTrack n&apos;est pas branché : ajoute TRENDTRACK_API_KEY (voir le guide de déploiement).</Notice>
+          <Notice tone="watch">
+            TrendTrack n&apos;est pas branché : ajoute ta clé dans{" "}
+            <Link href="/reglages" className="underline underline-offset-4">Réglages → Connexions</Link>.
+          </Notice>
         ) : null}
         {view.lastSync && !view.lastSync.ok ? <Notice tone="cut">Dernier relevé en échec : {view.lastSync.detail}</Notice> : null}
         {!view.sources.ai && !view.sources.demo ? (
           <Notice tone="wait">
-            Sans clé Anthropic, la comparaison de scripts reste locale : elle ne reconnaît pas une traduction (français → italien). Marque à la main les créas déjà
+            Sans clé Anthropic (Réglages → Connexions), la comparaison de scripts reste locale : elle ne reconnaît pas une traduction (français → italien). Marque à la main les créas déjà
             testées.
           </Notice>
         ) : null}

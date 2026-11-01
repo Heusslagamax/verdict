@@ -34,87 +34,58 @@ validées, les coupées) et celles que tu peux récupérer, script comparé par 
 
 Tests du moteur, sur les exemples chiffrés de la formation et sur ta ligne Norveline : `npm test`.
 
-## Mise en ligne, pas à pas (≈ 45 min)
+## Comptes et espaces
 
-Tu crées les comptes et colles les clés ; le code est prêt.
+Verdict est multi-espaces. Chaque espace a ses boutiques, ses concurrents, ses seuils et
+**ses propres clés** Meta, TrendTrack et Anthropic. Aucun espace ne voit les données d'un autre.
 
-### 1. Mettre le code sur GitHub
+- **Accès sur invitation uniquement.** Un administrateur (page **Admin**) ouvre l'accès à un
+  nouvel e-mail. L'espace de cette personne est créé, vide, à sa première connexion.
+- **Membres.** Un propriétaire invite des membres dans son espace (Réglages → Membres). Un
+  membre consulte, marque les créas et colle des scripts. Un propriétaire gère aussi les clés,
+  les boutiques et les membres.
+- **Clés.** Elles se collent dans Réglages → Connexions. Chacune est vérifiée auprès du
+  service avant d'être enregistrée, puis chiffrée (AES-256-GCM). Seuls les 4 derniers
+  caractères restent visibles.
+- **P&L.** Chaque espace colle le lien de son Google Sheets et le partage en lecture avec
+  l'adresse du compte de service de la plateforme, affichée dans Réglages → Espace.
+- **Plusieurs espaces.** Une personne peut appartenir à plusieurs espaces : le sélecteur en
+  haut à gauche permet de passer de l'un à l'autre.
 
-1. Crée un dépôt **privé** sur github.com (par exemple `verdict`).
-2. Dans le dossier du projet :
-   ```bash
-   git init && git add . && git commit -m "Verdict v1"
-   git branch -M main
-   git remote add origin https://github.com/<ton-compte>/verdict.git
-   git push -u origin main
-   ```
+## Variables de la plateforme (Vercel)
 
-### 2. Supabase (base de données + connexion)
+| Variable | Rôle |
+| --- | --- |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Base et connexion (type Config). |
+| `SUPABASE_SECRET_KEY` | Accès serveur à la base (type Secret). |
+| `ENCRYPTION_KEY` | Facultatif : 32 octets en base64 pour chiffrer les clés des espaces. Sans elle, une clé est dérivée de `SUPABASE_SECRET_KEY`. |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | Compte de service Google en lecture seule, pour lire les P&L. |
+| `CRON_SECRET` | Protège la tâche du matin. |
+| `ANTHROPIC_MODEL`, `TRENDTRACK_ROWS`, `META_GRAPH_VERSION` | Facultatifs, valeurs par défaut correctes. |
 
-1. Crée un projet sur supabase.com, région Europe (Paris ou Francfort).
-2. **SQL Editor** → colle le contenu de `supabase/migrations/0001_init.sql` → Run. Puis colle
-   `supabase/seed.sql` → Run (tes deux boutiques, les seuils Norveline, BagIt, Inolyo et Stryde).
-3. **Authentication → Sign In / Providers** : désactive « Allow new users to sign up ». Seuls
-   les comptes que tu crées pourront entrer.
-4. **Authentication → Users → Add user → Create new user** : ton e-mail, coche « Auto Confirm
-   User ». Refais-le pour ton associé. Chaque compte créé devient membre automatiquement.
-5. **Authentication → URL Configuration** : Site URL = l'adresse Vercel de l'étape 4 ; ajoute
-   `https://<ton-domaine>/auth/confirm` dans « Redirect URLs ».
-6. **Project Settings → API Keys** : note l'URL du projet, la clé « publishable » et la clé
-   « secret ».
+Les clés Meta, TrendTrack et Anthropic ne vont **pas** dans Vercel : chaque espace saisit les
+siennes dans l'application.
 
-### 3. Les clés des services
+## Base de données
 
-- **Meta (lecture seule)** :
-  1. developers.facebook.com → Créer une app de type « Business », rattachée au BM Moulay Agency.
-  2. business.facebook.com → Paramètres → Utilisateurs système → Ajouter (rôle Employé).
-  3. « Attribuer des éléments » : comptes pub « compte PUB1 » et « Movesana », permission
-     « Voir les performances » seulement.
-  4. « Générer un jeton » : choisis l'app, coche **ads_read** et rien d'autre, expiration
-     « Jamais ». C'est `META_ACCESS_TOKEN`.
-- **TrendTrack** : app.trendtrack.io → Workspace settings → API → nouvelle clé. Coût : environ
-  3 × `TRENDTRACK_ROWS` crédits par concurrent et par relevé. Avec 3 concurrents et un relevé par
-  jour, compte environ 4 000 crédits par mois sur tes 10 000, plus tes relevés manuels.
-- **Anthropic** : console.anthropic.com → API Keys. Modèle par défaut : `claude-sonnet-5-5`.
-- **P&L Google Sheets** :
-  1. console.cloud.google.com → nouveau projet → active « Google Sheets API ».
-  2. IAM → Comptes de service → Créer → onglet Clés → Ajouter une clé JSON.
-  3. Ouvre « Copie de P&L - Zecom Academy » → Partager → colle l'e-mail du compte de service en
-     **Lecteur**.
-  4. `PNL_SPREADSHEET_ID` = `1G1Du9llysrNUx4rUHV-Ri79cfOzLW0B9iuPXuefy9Ps`.
-  5. Colonnes déjà réglées : Norveline A, F, J, M ; Movesana A, W, AA, AD (modifiables dans Réglages).
-
-### 4. Vercel (hébergement)
-
-1. vercel.com → Add New → Project → importe le dépôt GitHub.
-2. Avant « Deploy », ouvre « Environment Variables » et colle chaque ligne de `.env.example`
-   avec tes valeurs. Pour `CRON_SECRET`, mets une longue chaîne aléatoire.
-3. Deploy. Reporte l'adresse obtenue dans Supabase (étape 2.5).
-4. La tâche du matin (`vercel.json`) tourne chaque jour à 5 h 30 UTC : relevé Meta, photo
-   TrendTrack, comparaison IA des scripts, brief.
-
-### 5. Premier contrôle
-
-1. Connecte-toi : `/login`, lien reçu par e-mail.
-2. **Réglages** : les cinq branchements doivent afficher « Branché ». Saisis les seuils de
-   Movesana (calculateur intégré, ou ta ligne du fichier).
-3. **Radar → Relever maintenant**. Pour vérifier la forme des données TrendTrack (1 crédit) :
-   `/api/debug/trendtrack?bt=b624f76d-5a4d-4db5-9af3-a383b1ba269b`.
-4. Dans le cockpit, ouvre une ad et colle son script : le radar ne te proposera plus de créa au
-   script identique, même traduite.
+Les migrations sont dans `supabase/migrations/`, à appliquer dans l'ordre (SQL Editor) sur un
+nouveau projet. `0004_workspaces.sql` reprend l'existant dans un premier espace.
 
 ## Lancer en local
 
 ```bash
 npm install
-cp .env.example .env.local   # sans Supabase : mode démo
+cp .env.example .env.local   # sans Supabase : mode démo, données fictives
 npm run dev                  # http://localhost:3000
 ```
 
 ## Architecture
 
 - Next.js 16 (App Router, `src/proxy.ts` pour la session), React 19, Tailwind 4, Radix.
-- Supabase : connexion par lien magique, membres uniquement (RLS sur toutes les tables).
+- Supabase : connexion par lien magique sur invitation, espaces et membres, RLS par
+  appartenance sur toutes les tables, clés des services chiffrées (`src/lib/crypto.ts`).
+- `src/lib/workspace.ts` : qui est connecté, espace actif (cookie), clés de l'espace. Toute
+  page et toute action passent par là avant de lire ou d'écrire.
 - `src/lib/adapters/` : Meta (API Marketing v26, lecture seule), TrendTrack (REST, normaliseur
   tolérant), Google Sheets (P&L), Anthropic (sorties structurées validées par zod).
 - `src/lib/engine/` : fonctions pures, testées, sans accès réseau.

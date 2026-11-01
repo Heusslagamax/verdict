@@ -1,8 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Sparkles } from "lucide-react";
-import { requireViewer } from "@/lib/auth";
-import { features, demoMode } from "@/lib/env";
+import { getCredentials, requireWorkspace } from "@/lib/workspace";
 import { getShop, latestBrief, listShops } from "@/lib/data/repo";
 import { relativeTime } from "@/lib/format";
 import { Shell } from "@/components/shell";
@@ -15,14 +14,14 @@ export const metadata = { title: "Brief IA" };
 const PRIORITY = { haute: "var(--cut)", moyenne: "var(--watch)", basse: "var(--wait)" } as const;
 
 export default async function BriefPage({ params }: PageProps<"/[shop]/brief">) {
-  const viewer = await requireViewer();
+  const ctx = await requireWorkspace();
   const { shop: slug } = await params;
-  const [shop, shops] = await Promise.all([getShop(slug), listShops()]);
+  const [shop, shops, creds] = await Promise.all([getShop(ctx.workspace.id, slug), listShops(ctx.workspace.id), getCredentials(ctx.workspace.id)]);
   if (!shop) notFound();
   const brief = await latestBrief(shop);
 
   return (
-    <Shell shops={shops.map((s) => ({ slug: s.slug, name: s.name }))} current={slug} tab="brief" email={viewer.email} demo={demoMode}>
+    <Shell ctx={ctx} shops={shops} current={slug} tab="brief">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-[24px] font-semibold">{shop.name} · brief du matin</h1>
@@ -35,9 +34,11 @@ export default async function BriefPage({ params }: PageProps<"/[shop]/brief">) 
         </ActionButton>
       </div>
 
-      {!features.ai && !demoMode ? (
+      {!creds.anthropic && !ctx.viewer.demo ? (
         <div className="mt-5">
-          <Notice tone="watch">Ajoute ANTHROPIC_API_KEY pour activer le brief (voir le guide de déploiement).</Notice>
+          <Notice tone="watch">
+            Ajoute ta clé Anthropic dans <Link href="/reglages" className="underline underline-offset-4">Réglages → Connexions</Link> pour activer le brief.
+          </Notice>
         </div>
       ) : null}
 
