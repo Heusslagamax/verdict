@@ -50,7 +50,7 @@ export function Figure({
   return (
     <div className="min-w-0">
       <Label>{label}</Label>
-      <div className={clsx("num mt-1 truncate", size === "lg" ? "text-[30px] leading-9" : "text-[20px] leading-7")} style={{ color }}>
+      <div className={clsx("figure mt-1.5 truncate", size === "lg" ? "text-[30px]" : "text-[21px]")} style={{ color }}>
         {value}
       </div>
       {sub ? <div className="mt-0.5 text-[12px] text-chalk-3">{sub}</div> : null}

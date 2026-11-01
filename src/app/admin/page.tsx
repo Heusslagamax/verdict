@@ -21,7 +21,8 @@ export default async function AdminPage() {
 
   return (
     <Shell ctx={ctx} shops={shops} current={null} tab="admin">
-      <h1 className="text-[24px] font-semibold">Admin</h1>
+      <p className="eyebrow">Plateforme</p>
+      <h1 className="mt-1 text-[28px] font-semibold tracking-[-0.03em]">Admin</h1>
       <p className="mt-1 text-[13px] text-chalk-3">
         Ouvre l&apos;accès à Verdict pour une nouvelle personne : son espace, vide et privé, sera créé à sa première connexion. Elle y branchera ses propres
         clés Meta, TrendTrack et Anthropic.

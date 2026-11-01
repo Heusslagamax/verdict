@@ -24,7 +24,8 @@ export default async function BriefPage({ params }: PageProps<"/[shop]/brief">) 
     <Shell ctx={ctx} shops={shops} current={slug} tab="brief">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-[24px] font-semibold">{shop.name} · brief du matin</h1>
+          <p className="eyebrow">Brief du matin</p>
+          <h1 className="mt-1 text-[28px] font-semibold tracking-[-0.03em]">{shop.name}</h1>
           <p className="mt-1 text-[13px] text-chalk-3">
             {brief ? `Rédigé ${relativeTime(brief.createdAt)}` : "Pas encore de brief"} · généré chaque matin vers 6 h 30, à partir des verdicts du moteur et du radar
           </p>

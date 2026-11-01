@@ -1,11 +1,12 @@
 import "server-only";
 import { demoMode, platform } from "@/lib/env";
 import { getCredentials, type Workspace } from "@/lib/workspace";
-import { ageInDays, sumDays, totalsFor, windowDays } from "@/lib/engine/metrics";
+import { ageInDays, lastDays, sumDays, totalsFor } from "@/lib/engine/metrics";
 import { decideCampaign, judgeAd } from "@/lib/engine/verdict";
 import { readCompetitorAd } from "@/lib/engine/competitors";
 import { fetchPnlDays, pnlRoas } from "@/lib/adapters/pnl";
 import type {
+  AdDay,
   AdVerdict,
   CampaignDecision,
   Competitor,
@@ -22,6 +23,40 @@ import type { AiMatch } from "@/lib/engine/competitors";
 import * as repo from "./repo";
 import { ensureFreshMeta, ownScripts } from "./sync";
 
+/** Un jour sur l'axe des graphiques (14 derniers jours complets). */
+export interface DayPoint {
+  date: string;
+  spend: number;
+  value: number;
+  purchases: number;
+  addToCart: number;
+  roas: number | null;
+}
+
+export const SERIES_DAYS = 14;
+
+function series(days: AdDay[], axis: string[]): DayPoint[] {
+  const by = new Map<string, DayPoint>();
+  for (const d of days) {
+    const p = by.get(d.date) ?? { date: d.date, spend: 0, value: 0, purchases: 0, addToCart: 0, roas: null };
+    p.spend += d.spend;
+    p.value += d.value;
+    p.purchases += d.purchases;
+    p.addToCart += d.addToCart;
+    by.set(d.date, p);
+  }
+  return axis.map((date) => {
+    const p = by.get(date) ?? { date, spend: 0, value: 0, purchases: 0, addToCart: 0, roas: null };
+    return { ...p, roas: p.spend > 0 ? p.value / p.spend : null };
+  });
+}
+
+/** Résultat estimé avant frais fixes : CA × marge avant pub − dépense (marge = 1 / BE). */
+export function estimatedProfit(totals: Totals, t: Thresholds | null): number | null {
+  if (!t || !(t.be > 0)) return null;
+  return totals.value / t.be - totals.spend;
+}
+
 export interface AdView {
   id: string;
   name: string;
@@ -32,8 +67,10 @@ export interface AdView {
   lifetimeSpend: number;
   share: number;
   verdict: AdVerdict | null;
-  /** Dépense et ROAS jour par jour sur 7 jours (sparklines). */
-  trend: { date: string; spend: number; roas: number | null }[];
+  /** Totaux de la période précédente (même durée), pour la tendance. */
+  prev: Totals;
+  /** Jour par jour sur 14 jours. */
+  trend: DayPoint[];
   hasScript: boolean;
   script: string | null;
 }
@@ -42,6 +79,11 @@ export interface AdsetView {
   id: string;
   name: string;
   ads: AdView[];
+  totals: Totals;
+  prev: Totals;
+  share: number;
+  counts: Record<AdVerdict["code"], number>;
+  trend: DayPoint[];
 }
 
 export interface CampaignView {
@@ -51,9 +93,22 @@ export interface CampaignView {
   dailyBudget: number | null;
   lifetimeSpend: number;
   totals: Totals;
+  prev: Totals;
+  profit: number | null;
+  prevProfit: number | null;
+  /** Jour par jour sur 14 jours (courbes). */
+  series: DayPoint[];
   decision: CampaignDecision | null;
   adsets: AdsetView[];
   counts: Record<AdVerdict["code"], number>;
+}
+
+export interface PnlView {
+  roas3d: number | null;
+  roasYesterday: number | null;
+  error: string | null;
+  /** ROAS du P&L jour par jour (toute la boutique), aligné sur l'axe des graphiques. */
+  days: { date: string; roas: number | null }[];
 }
 
 export interface CockpitView {
@@ -64,7 +119,7 @@ export interface CockpitView {
   syncError: string | null;
   thresholds: Thresholds | null;
   shopTotals: Totals;
-  pnl: { roas3d: number | null; roasYesterday: number | null; error: string | null } | null;
+  pnl: PnlView | null;
   campaigns: CampaignView[];
   sources: { meta: boolean; pnl: boolean; demo: boolean };
 }
@@ -85,13 +140,14 @@ export async function buildCockpit(ws: Workspace, slug: string, window: Window, 
 
   const ads: MetaAd[] = snap?.ads ?? [];
   const t = shop.thresholds;
-  const last7 = new Set(windowDays("7d", today));
+  const axis = lastDays(SERIES_DAYS, today);
 
   const campaigns: CampaignView[] = (snap?.campaigns ?? [])
     .map((c) => {
       const cAds = ads.filter((a) => a.campaignId === c.id);
       const cDays = cAds.flatMap((a) => a.days);
       const totals = totalsFor(cDays, window, today);
+      const prev = totalsFor(cDays, window, today, 1);
       const decision = t
         ? decideCampaign({
             campaign: c,
@@ -120,17 +176,26 @@ export async function buildCockpit(ws: Workspace, slug: string, window: Window, 
           lifetimeSpend: a.lifetimeSpend,
           share: totals.spend > 0 ? w.spend / totals.spend : 0,
           verdict,
-          trend: a.days
-            .filter((d) => last7.has(d.date))
-            .map((d) => ({ date: d.date, spend: d.spend, roas: d.spend > 0 ? d.value / d.spend : null })),
+          prev: totalsFor(a.days, window, today, 1),
+          trend: series(a.days, axis),
           hasScript: scripts.has(a.id),
           script: scripts.get(a.id) ?? null,
         };
-        const set = adsets.get(a.adsetId) ?? { id: a.adsetId, name: a.adsetName, ads: [] };
+        const set =
+          adsets.get(a.adsetId) ??
+          ({ id: a.adsetId, name: a.adsetName, ads: [], totals: totals, prev, share: 0, counts: emptyCounts(), trend: [] } as AdsetView);
         set.ads.push(view);
+        if (verdict) set.counts[verdict.code]++;
         adsets.set(a.adsetId, set);
       }
-      for (const s of adsets.values()) s.ads.sort((x, y) => y.totals.spend - x.totals.spend);
+      for (const s of adsets.values()) {
+        s.ads.sort((x, y) => y.totals.spend - x.totals.spend);
+        const setDays = cAds.filter((a) => a.adsetId === s.id).flatMap((a) => a.days);
+        s.totals = totalsFor(setDays, window, today);
+        s.prev = totalsFor(setDays, window, today, 1);
+        s.share = totals.spend > 0 ? s.totals.spend / totals.spend : 0;
+        s.trend = series(setDays, axis);
+      }
       return {
         id: c.id,
         name: c.name,
@@ -138,8 +203,12 @@ export async function buildCockpit(ws: Workspace, slug: string, window: Window, 
         dailyBudget: c.dailyBudget,
         lifetimeSpend: c.lifetimeSpend,
         totals,
+        prev,
+        profit: estimatedProfit(totals, t),
+        prevProfit: estimatedProfit(prev, t),
+        series: series(cDays, axis),
         decision,
-        adsets: [...adsets.values()],
+        adsets: [...adsets.values()].sort((x, y) => y.totals.spend - x.totals.spend),
         counts,
       };
     })
@@ -170,13 +239,21 @@ export async function buildCockpit(ws: Workspace, slug: string, window: Window, 
 
 const pnlReady = (shop: Shop) => Boolean(shop.pnl?.spendColumn && shop.pnl?.salesColumn && shop.pnl?.roasColumn);
 
-async function loadPnl(ws: Workspace, shop: Shop, today: Date) {
+async function loadPnl(ws: Workspace, shop: Shop, today: Date): Promise<PnlView | null> {
   if (!platform.googleSheets || !ws.pnlSpreadsheetId || !pnlReady(shop)) return null;
   try {
     const days = await fetchPnlDays(ws.pnlSpreadsheetId, shop.pnl!, today);
-    return { ...pnlRoas(days, today), error: null };
+    const by = new Map(days.map((d) => [d.date, d]));
+    return {
+      ...pnlRoas(days, today),
+      error: null,
+      days: lastDays(SERIES_DAYS, today).map((date) => {
+        const d = by.get(date);
+        return { date, roas: d ? (d.roas ?? (d.spend > 0 ? d.sales / d.spend : null)) : null };
+      }),
+    };
   } catch (e) {
-    return { roas3d: null, roasYesterday: null, error: e instanceof Error ? e.message : String(e) };
+    return { roas3d: null, roasYesterday: null, error: e instanceof Error ? e.message : String(e), days: [] };
   }
 }
 

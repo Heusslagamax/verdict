@@ -8,7 +8,7 @@ import { buildCockpit } from "@/lib/data/views";
 import { relativeTime, WINDOW_LABEL } from "@/lib/format";
 import type { Window } from "@/lib/types";
 import { Shell } from "@/components/shell";
-import { CampaignSection } from "@/components/campaign-section";
+import { CampaignBoard } from "@/components/cockpit/campaign-board";
 import { ActionButton } from "@/components/action-button";
 import { Notice, Panel } from "@/components/ui";
 import { refreshMeta } from "@/app/actions";
@@ -31,16 +31,39 @@ export default async function CockpitPage({ params, searchParams }: PageProps<"/
   const totalCut = active.reduce((a, c) => a + c.counts.cut, 0);
   const totalIterate = active.reduce((a, c) => a + c.counts.iterate, 0);
 
+  const stale = view.sources.demo ? "données de démo" : `Meta ${relativeTime(view.fetchedAt)}`;
+  const pnlState = view.sources.pnl ? (view.pnl?.error ? "P&L en erreur" : "P&L branché") : "P&L non branché";
+
   return (
     <Shell ctx={ctx} shops={shops} current={slug} tab="cockpit">
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-[24px] font-semibold">{view.shop.name} · cockpit</h1>
-          <p className="mt-1 text-[13px] text-chalk-3">
-            {active.length} campagne{active.length > 1 ? "s" : ""} active{active.length > 1 ? "s" : ""}
-            {active.length ? ` · ${totalCut} ad${totalCut > 1 ? "s" : ""} à couper · ${totalIterate} à itérer` : ""}
-            {" · "}Meta {view.sources.demo ? "démo" : relativeTime(view.fetchedAt)}
-            {view.sources.pnl ? (view.pnl?.error ? " · P&L en erreur" : " · P&L branché") : " · P&L non branché"}
+        <div className="min-w-0">
+          <p className="eyebrow">Cockpit · {view.shop.market}</p>
+          <h1 className="mt-1 text-[28px] font-semibold tracking-[-0.03em]">{view.shop.name}</h1>
+          <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-chalk-3">
+            <span>
+              {active.length} campagne{active.length > 1 ? "s" : ""} active{active.length > 1 ? "s" : ""}
+            </span>
+            {active.length ? (
+              <>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="size-1.5 rounded-full bg-cut" />
+                  {totalCut} pub{totalCut > 1 ? "s" : ""} à couper
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="size-1.5 rounded-full bg-iterate" />
+                  {totalIterate} à itérer
+                </span>
+              </>
+            ) : null}
+            <span className="inline-flex items-center gap-1.5">
+              <span className={clsx("size-1.5 rounded-full", view.syncError ? "bg-cut" : "bg-keep")} />
+              {stale}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className={clsx("size-1.5 rounded-full", view.sources.pnl && !view.pnl?.error ? "bg-keep" : "bg-watch")} />
+              {pnlState}
+            </span>
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -50,7 +73,7 @@ export default async function CockpitPage({ params, searchParams }: PageProps<"/
                 key={x}
                 href={`/${slug}?w=${x}`}
                 aria-current={x === w ? "true" : undefined}
-                className={clsx("rounded-[7px] px-3 py-1.5 text-[13px]", x === w ? "bg-ink-3 text-chalk-1" : "text-chalk-3 hover:text-chalk-1")}
+                className={clsx("press rounded-[7px] px-3 py-1.5 text-[13px]", x === w ? "bg-ink-4 text-chalk-1" : "text-chalk-3 hover:text-chalk-1")}
               >
                 {WINDOW_LABEL[x]}
               </Link>
@@ -62,7 +85,7 @@ export default async function CockpitPage({ params, searchParams }: PageProps<"/
         </div>
       </div>
 
-      <div className="mt-5 space-y-3">
+      <div className="mt-5 space-y-3 empty:hidden">
         {view.syncError ? <Notice tone="cut">Dernière synchronisation Meta en échec : {view.syncError}. Données affichées : dernier relevé réussi.</Notice> : null}
         {!view.sources.meta && !view.sources.demo ? (
           <Notice tone="watch">
@@ -72,14 +95,14 @@ export default async function CockpitPage({ params, searchParams }: PageProps<"/
         ) : null}
         {!view.thresholds ? (
           <Notice tone="watch">
-            Seuils manquants pour {view.shop.name}. <Link href="/reglages" className="underline underline-offset-4">Renseigne-les dans Réglages</Link> pour activer les verdicts.
+            Seuils manquants pour {view.shop.name}. <Link href="/reglages" className="underline underline-offset-4">Renseigne-les dans Réglages</Link> pour activer les verdicts et les graphiques.
           </Notice>
         ) : null}
       </div>
 
-      <div className="mt-5 space-y-5">
+      <div className="mt-6 space-y-12">
         {active.map((c) => (
-          <CampaignSection key={c.id} c={c} t={view.thresholds} window={w} shopSlug={slug} pnl={view.pnl} />
+          <CampaignBoard key={c.id} c={c} t={view.thresholds} window={w} shopSlug={slug} pnl={view.pnl} />
         ))}
         {!active.length ? (
           <Panel className="p-8 text-center">
@@ -92,9 +115,9 @@ export default async function CockpitPage({ params, searchParams }: PageProps<"/
             <summary className="cursor-pointer list-none px-5 py-3 text-[13px] text-chalk-2 hover:text-chalk-1">
               Campagnes en pause <span className="num text-chalk-3">{paused.length}</span>
             </summary>
-            <div className="space-y-5 p-3 pt-0">
+            <div className="space-y-12 p-4 pt-2">
               {paused.map((c) => (
-                <CampaignSection key={c.id} c={c} t={view.thresholds} window={w} shopSlug={slug} pnl={view.pnl} />
+                <CampaignBoard key={c.id} c={c} t={view.thresholds} window={w} shopSlug={slug} pnl={view.pnl} />
               ))}
             </div>
           </details>

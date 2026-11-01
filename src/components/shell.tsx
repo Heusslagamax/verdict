@@ -1,15 +1,18 @@
 import Link from "next/link";
 import clsx from "clsx";
 import type { ReactNode } from "react";
+import { Gauge, Radar, Settings2, ShieldCheck, Sparkles, LogOut } from "lucide-react";
 import type { Ctx } from "@/lib/workspace";
 import { Mark } from "./ui";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 
 type Tab = "cockpit" | "radar" | "brief" | "reglages" | "admin";
 
+const ICONS = { cockpit: Gauge, radar: Radar, brief: Sparkles, reglages: Settings2, admin: ShieldCheck } as const;
+
 /**
- * Coque : la marque, l'espace en cours et ses boutiques à gauche (la portée de l'écran),
- * la navigation qui s'efface, le compte à droite.
+ * Coque. Sur grand écran, une barre latérale d'instruments : l'espace, ses boutiques, les
+ * écrans, le compte. Sur téléphone et tablette, une barre compacte en haut.
  */
 export function Shell({
   ctx,
@@ -41,27 +44,108 @@ export function Shell({
 
   return (
     <div className="min-h-dvh">
-      <header className="sticky top-0 z-30 border-b border-rule-1 bg-ink-0">
-        <div className="mx-auto flex h-14 max-w-[1440px] items-center gap-2.5 px-4 sm:gap-3 sm:px-6">
-          <Link href="/" className="flex shrink-0 items-center gap-2.5 pr-1" aria-label="Verdict, accueil">
+      {/* Barre latérale (grand écran) */}
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[248px] flex-col border-r border-rule-1 bg-ink-0 xl:flex">
+        <Link href="/" className="flex h-16 shrink-0 items-center gap-2.5 px-5" aria-label="Verdict, accueil">
+          <Mark size={24} />
+          <span className="text-[16px] font-semibold tracking-[-0.02em]">Verdict</span>
+        </Link>
+
+        {workspace ? (
+          <div className="px-3">
+            <WorkspaceSwitcher current={workspace} workspaces={workspaces} className="w-full justify-between" />
+          </div>
+        ) : null}
+
+        <nav aria-label="Boutique" className="mt-6 px-3">
+          <p className="eyebrow px-2 pb-2">Boutiques</p>
+          <ul className="space-y-0.5">
+            {shops.map((s) => (
+              <li key={s.slug}>
+                <Link
+                  href={shopHref(s.slug)}
+                  aria-current={s.slug === current ? "page" : undefined}
+                  className={clsx(
+                    "press flex h-9 items-center gap-2.5 rounded-[8px] px-2 text-[13px]",
+                    s.slug === current ? "bg-ink-3 text-chalk-1" : "text-chalk-2 hover:bg-ink-2 hover:text-chalk-1",
+                  )}
+                >
+                  <span
+                    aria-hidden
+                    className={clsx(
+                      "grid size-5 shrink-0 place-items-center rounded-[5px] text-[10px] font-semibold",
+                      s.slug === current ? "bg-signal text-signal-ink" : "bg-ink-3 text-chalk-2",
+                    )}
+                  >
+                    {s.name.slice(0, 1).toUpperCase()}
+                  </span>
+                  <span className="truncate">{s.name}</span>
+                </Link>
+              </li>
+            ))}
+            {!shops.length ? <li className="px-2 text-[12px] text-chalk-4">Aucune boutique</li> : null}
+          </ul>
+        </nav>
+
+        <nav aria-label="Sections" className="mt-6 px-3">
+          <p className="eyebrow px-2 pb-2">Écrans</p>
+          <ul className="space-y-0.5">
+            {tabs.map((t) => {
+              const Icon = ICONS[t.id];
+              const on = t.id === tab;
+              return (
+                <li key={t.id}>
+                  <Link
+                    href={t.href}
+                    aria-current={on ? "page" : undefined}
+                    className={clsx(
+                      "press relative flex h-9 items-center gap-2.5 rounded-[8px] px-2 text-[13px]",
+                      on ? "bg-ink-2 text-chalk-1" : "text-chalk-3 hover:bg-ink-2 hover:text-chalk-1",
+                    )}
+                  >
+                    {on ? <span aria-hidden className="absolute -left-3 top-2 h-5 w-[3px] rounded-r-full bg-signal" /> : null}
+                    <Icon className={clsx("size-4 shrink-0", on ? "text-signal" : "")} aria-hidden />
+                    {t.label}
+                  </Link>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+
+        <div className="mt-auto border-t border-rule-1 px-5 py-4">
+          {viewer.demo ? (
+            <span className="mb-3 inline-flex rounded-[5px] bg-watch/10 px-2 py-1 text-[11px] text-watch">Démo · données fictives</span>
+          ) : null}
+          <p className="truncate text-[12px] text-chalk-3">{viewer.email}</p>
+          {!viewer.demo ? (
+            <form action="/auth/signout" method="post" className="mt-2">
+              <button className="inline-flex items-center gap-1.5 text-[12px] text-chalk-3 hover:text-chalk-1">
+                <LogOut className="size-3.5" aria-hidden />
+                Se déconnecter
+              </button>
+            </form>
+          ) : null}
+          <p className="mt-3 text-[11px] leading-4 text-chalk-4">Lecture seule sur Meta : Verdict ne touche jamais au budget.</p>
+        </div>
+      </aside>
+
+      {/* Barre du haut (téléphone et tablette) */}
+      <header className="sticky top-0 z-30 border-b border-rule-1 bg-ink-0/95 backdrop-blur xl:hidden">
+        <div className="flex h-14 items-center gap-2.5 px-4 sm:px-6">
+          <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="Verdict, accueil">
             <Mark />
-            <span className="hidden text-[15px] font-semibold tracking-[-0.01em] lg:inline">Verdict</span>
           </Link>
-
           {workspace ? <WorkspaceSwitcher current={workspace} workspaces={workspaces} /> : null}
-
           {shops.length ? (
-            <nav
-              aria-label="Boutique"
-              className="scrollbar-thin flex min-w-0 items-center overflow-x-auto rounded-[var(--radius-m)] border border-rule-1 bg-ink-1 p-0.5"
-            >
+            <nav aria-label="Boutique" className="scrollbar-thin flex min-w-0 items-center overflow-x-auto rounded-[var(--radius-m)] border border-rule-1 bg-ink-1 p-0.5">
               {shops.map((s) => (
                 <Link
                   key={s.slug}
                   href={shopHref(s.slug)}
                   aria-current={s.slug === current ? "page" : undefined}
                   className={clsx(
-                    "press shrink-0 whitespace-nowrap rounded-[7px] px-2.5 py-1.5 text-[13px] sm:px-3",
+                    "press shrink-0 whitespace-nowrap rounded-[7px] px-2.5 py-1.5 text-[13px]",
                     s.slug === current ? "bg-ink-3 text-chalk-1" : "text-chalk-3 hover:text-chalk-1",
                   )}
                 >
@@ -70,48 +154,39 @@ export function Shell({
               ))}
             </nav>
           ) : null}
-
-          <nav aria-label="Sections" className="ml-1 hidden items-center gap-1 lg:flex">
-            {tabs.map((t) => (
-              <Link
-                key={t.id}
-                href={t.href}
-                aria-current={t.id === tab ? "page" : undefined}
-                className={clsx("whitespace-nowrap rounded-[7px] px-2.5 py-1.5 text-[13px]", t.id === tab ? "text-chalk-1" : "text-chalk-3 hover:text-chalk-1")}
-              >
-                {t.label}
-              </Link>
-            ))}
-          </nav>
-
           <div className="ml-auto flex shrink-0 items-center gap-3">
-            {viewer.demo ? (
-              <span className="whitespace-nowrap rounded-[5px] bg-watch/10 px-2 py-1 text-[12px] text-watch">
-                Démo<span className="hidden sm:inline"> · données fictives</span>
-              </span>
-            ) : null}
-            <span className="hidden text-[12px] text-chalk-3 xl:inline">{viewer.email}</span>
+            {viewer.demo ? <span className="rounded-[5px] bg-watch/10 px-2 py-1 text-[11px] text-watch">Démo</span> : null}
             {!viewer.demo ? (
               <form action="/auth/signout" method="post">
-                <button className="whitespace-nowrap text-[12px] text-chalk-3 hover:text-chalk-1">Se déconnecter</button>
+                <button aria-label="Se déconnecter" className="grid size-9 place-items-center rounded-[8px] text-chalk-3 hover:bg-ink-2 hover:text-chalk-1">
+                  <LogOut className="size-4" aria-hidden />
+                </button>
               </form>
             ) : null}
           </div>
         </div>
-        <nav aria-label="Sections" className="scrollbar-thin flex gap-1 overflow-x-auto border-t border-rule-1 px-3 py-1.5 lg:hidden">
-          {tabs.map((t) => (
-            <Link
-              key={t.id}
-              href={t.href}
-              aria-current={t.id === tab ? "page" : undefined}
-              className={clsx("shrink-0 rounded-[7px] px-3 py-2 text-[13px]", t.id === tab ? "bg-ink-2 text-chalk-1" : "text-chalk-3")}
-            >
-              {t.label}
-            </Link>
-          ))}
+        <nav aria-label="Sections" className="scrollbar-thin flex gap-1 overflow-x-auto border-t border-rule-1 px-3 py-1.5">
+          {tabs.map((t) => {
+            const Icon = ICONS[t.id];
+            return (
+              <Link
+                key={t.id}
+                href={t.href}
+                aria-current={t.id === tab ? "page" : undefined}
+                className={clsx(
+                  "flex shrink-0 items-center gap-1.5 rounded-[7px] px-3 py-2 text-[13px]",
+                  t.id === tab ? "bg-ink-2 text-chalk-1" : "text-chalk-3",
+                )}
+              >
+                <Icon className={clsx("size-3.5", t.id === tab ? "text-signal" : "")} aria-hidden />
+                {t.label}
+              </Link>
+            );
+          })}
         </nav>
       </header>
-      <main className="mx-auto max-w-[1440px] px-4 pb-24 pt-6 sm:px-6">{children}</main>
+
+      <main className="mx-auto max-w-[1520px] px-4 pb-24 pt-6 sm:px-6 xl:ml-[248px] xl:px-8 xl:pt-8">{children}</main>
     </div>
   );
 }

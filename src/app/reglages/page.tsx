@@ -37,7 +37,8 @@ export default async function SettingsPage() {
 
   return (
     <Shell ctx={ctx} shops={shops} current={null} tab="reglages">
-      <h1 className="text-[24px] font-semibold">Réglages · {workspace.name}</h1>
+      <p className="eyebrow">Réglages</p>
+      <h1 className="mt-1 text-[28px] font-semibold tracking-[-0.03em]">{workspace.name}</h1>
       <p className="mt-1 text-[13px] text-chalk-3">
         Tout ici ne concerne que cet espace : ses connexions, ses boutiques, ses membres.
         {!shops.length ? " Commence par brancher Meta, puis ajoute ta première boutique." : ""}

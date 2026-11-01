@@ -1,49 +1,61 @@
 @import "tailwindcss";
 
 /*
-  VERDICT — salle de pilotage.
-  Encre (surfaces neutres), craie (texte), filets (bordures). La couleur va sur les
-  données : un seul accent « signal » (le ROAS, la dépense) et cinq tampons de verdict.
+  VERDICT — tour de contrôle.
+  Nuit bleu ardoise (surfaces), givre (texte), filets bleutés. La couleur ne sert qu'à dire
+  quelque chose : un accent « signal » pour les données neutres et le langage de santé du
+  couloir ROAS (perte, sous le BE, mince, range, au-dessus), partagé par tous les graphiques.
+  Couleurs d'état validées au simulateur de daltonisme (ΔE ≥ 9 sur la surface des panneaux),
+  et toujours doublées d'un libellé ou d'une forme.
 */
 :root {
-  --ink-0: #07080a;
-  --ink-1: #0c0e11;
-  --ink-2: #121519;
-  --ink-3: #191d22;
-  --ink-well: #050607;
+  --ink-0: #0a0d14;
+  --ink-1: #10151f;
+  --ink-2: #151b27;
+  --ink-3: #1c2331;
+  --ink-4: #252d3d;
+  --ink-well: #080b11;
 
-  --chalk-1: #eceef0;
-  --chalk-2: #a7adb5;
-  --chalk-3: #6e757e;
-  --chalk-4: #474d55;
+  --chalk-1: #f1f4f9;
+  --chalk-2: #b4bccb;
+  --chalk-3: #7f899b;
+  --chalk-4: #4f586a;
 
-  --rule-1: rgba(255, 255, 255, 0.06);
-  --rule-2: rgba(255, 255, 255, 0.1);
-  --rule-3: rgba(255, 255, 255, 0.16);
+  --rule-1: rgba(148, 170, 210, 0.09);
+  --rule-2: rgba(148, 170, 210, 0.15);
+  --rule-3: rgba(148, 170, 210, 0.24);
 
-  --signal: #5ab4f0;
-  --signal-ink: #0b2233;
-  --signal-wash: rgba(90, 180, 240, 0.13);
+  --signal: #5aa9f8;
+  --signal-ink: #0b2236;
+  --signal-wash: rgba(90, 169, 248, 0.14);
+  --pnl: #c4a5ff;
 
-  --keep: #5ccf8e;
-  --keep-wash: rgba(92, 207, 142, 0.12);
-  --iterate: #5ab4f0;
-  --iterate-wash: rgba(90, 180, 240, 0.13);
-  --cut: #f2785f;
-  --cut-wash: rgba(242, 120, 95, 0.12);
-  --watch: #e8b95a;
-  --watch-wash: rgba(232, 185, 90, 0.12);
-  --wait: #8a919a;
-  --wait-wash: rgba(138, 145, 154, 0.12);
+  --keep: #34d399;
+  --keep-wash: rgba(52, 211, 153, 0.13);
+  --iterate: #5aa9f8;
+  --iterate-wash: rgba(90, 169, 248, 0.14);
+  --cut: #f05252;
+  --cut-wash: rgba(240, 82, 82, 0.13);
+  --watch: #f59e0b;
+  --watch-wash: rgba(245, 158, 11, 0.13);
+  --wait: #8b95a7;
+  --wait-wash: rgba(139, 149, 167, 0.13);
 
-  --zone-loss: rgba(242, 120, 95, 0.16);
-  --zone-thin: rgba(232, 185, 90, 0.14);
-  --zone-range: rgba(92, 207, 142, 0.2);
-  --zone-jump: rgba(92, 207, 142, 0.09);
+  /* Couloir ROAS : lavis très légers derrière les courbes, plus francs sur les jauges. */
+  --zone-loss: rgba(240, 82, 82, 0.1);
+  --zone-under: rgba(245, 158, 11, 0.09);
+  --zone-thin: rgba(180, 188, 203, 0.05);
+  --zone-range: rgba(52, 211, 153, 0.1);
+  --zone-above: rgba(52, 211, 153, 0.17);
+  --gauge-loss: rgba(240, 82, 82, 0.42);
+  --gauge-under: rgba(245, 158, 11, 0.4);
+  --gauge-thin: rgba(180, 188, 203, 0.2);
+  --gauge-range: rgba(52, 211, 153, 0.42);
+  --gauge-above: rgba(52, 211, 153, 0.7);
 
   --radius-s: 6px;
   --radius-m: 10px;
-  --radius-l: 14px;
+  --radius-l: 16px;
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
 }
@@ -53,6 +65,7 @@
   --color-ink-1: var(--ink-1);
   --color-ink-2: var(--ink-2);
   --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
   --color-ink-well: var(--ink-well);
   --color-chalk-1: var(--chalk-1);
   --color-chalk-2: var(--chalk-2);
@@ -64,13 +77,14 @@
   --color-signal: var(--signal);
   --color-signal-ink: var(--signal-ink);
   --color-signal-wash: var(--signal-wash);
+  --color-pnl: var(--pnl);
   --color-keep: var(--keep);
   --color-iterate: var(--iterate);
   --color-cut: var(--cut);
   --color-watch: var(--watch);
   --color-wait: var(--wait);
-  --font-sans: var(--font-instrument), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
   --radius-s: var(--radius-s);
   --radius-m: var(--radius-m);
   --radius-l: var(--radius-l);
@@ -86,13 +100,32 @@ body {
   color: var(--chalk-1);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
-  font-feature-settings: "ss01", "cv11";
+  font-feature-settings: "ss01";
 }
 
+/* Colonnes de chiffres : chasse fixe pour l'alignement. */
 .num {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.01em;
+}
+
+/* Grands chiffres isolés : la sans, chiffres proportionnels, approche resserrée. */
+.figure {
+  font-family: var(--font-sans);
+  font-variant-numeric: proportional-nums;
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1;
+}
+
+/* Petites capitales des libellés d'instruments. */
+.eyebrow {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--chalk-3);
 }
 
 
@@ -126,7 +159,17 @@ p {
   animation: rise 320ms var(--ease-out) both;
 }
 
+@keyframes draw {
+  from { stroke-dashoffset: var(--len, 1200); }
+  to { stroke-dashoffset: 0; }
+}
+.draw {
+  stroke-dasharray: var(--len, 1200);
+  animation: draw 700ms var(--ease-out) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .draw { animation: none; stroke-dasharray: none; }
   .rise { animation: none; }
   .press:active { transform: none; }
 }

@@ -8,7 +8,7 @@ import { switchWorkspace } from "@/app/actions";
 import type { WorkspaceRef } from "@/lib/workspace";
 
 /** Sélecteur d'espace : simple étiquette quand on n'appartient qu'à un seul espace. */
-export function WorkspaceSwitcher({ current, workspaces }: { current: WorkspaceRef; workspaces: WorkspaceRef[] }) {
+export function WorkspaceSwitcher({ current, workspaces, className }: { current: WorkspaceRef; workspaces: WorkspaceRef[]; className?: string }) {
   const [pending, start] = useTransition();
   const label = (
     <span className="flex min-w-0 items-center gap-2">
@@ -19,12 +19,12 @@ export function WorkspaceSwitcher({ current, workspaces }: { current: WorkspaceR
     </span>
   );
 
-  if (workspaces.length < 2) return <div className="flex shrink-0 items-center px-1">{label}</div>;
+  if (workspaces.length < 2) return <div className={clsx("flex shrink-0 items-center px-1", className)}>{label}</div>;
 
   return (
     <Popover.Root>
       <Popover.Trigger
-        className="press flex shrink-0 items-center gap-1.5 rounded-[var(--radius-m)] px-1.5 py-1.5 hover:bg-ink-2"
+        className={clsx("press flex shrink-0 items-center gap-1.5 rounded-[var(--radius-m)] px-1.5 py-1.5 hover:bg-ink-2", className)}
         aria-label={`Espace : ${current.name}. Changer d'espace`}
         aria-busy={pending}
       >

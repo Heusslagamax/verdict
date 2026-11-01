@@ -8,7 +8,8 @@ import type { Thresholds } from "@/lib/types";
 import { eur, int, pct, roas } from "@/lib/format";
 import { saveAdScript } from "@/app/actions";
 import { Figure, Stamp } from "./ui";
-import { roasColor } from "./ads-table";
+import { roasColor } from "./cockpit/ad-health-list";
+import { RoasTrend } from "./charts/roas-trend";
 
 interface Preview {
   iframe: string | null;
@@ -34,12 +35,14 @@ export function AdDrawer({
   ad,
   thresholds,
   shopSlug,
+  windowDays = 7,
   onClose,
 }: {
   ad: AdView | null;
   thresholds: Thresholds | null;
   shopSlug: string;
   campaignId: string;
+  windowDays?: number;
   onClose: () => void;
 }) {
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -68,7 +71,7 @@ export function AdDrawer({
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/60 data-[state=open]:animate-[rise_200ms]" />
         <Dialog.Content
-          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[880px] flex-col border-l border-rule-2 bg-ink-1 shadow-[0_0_0_1px_rgba(255,255,255,0.04)] focus:outline-none"
+          className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[960px] flex-col border-l border-rule-2 bg-ink-1 shadow-[0_0_0_1px_rgba(255,255,255,0.04)] focus:outline-none"
           aria-describedby={undefined}
           onOpenAutoFocus={(e) => e.preventDefault()}
         >
@@ -158,30 +161,48 @@ export function AdDrawer({
                   </section>
 
                   <section>
-                    <h3 className="text-[13px] font-medium text-chalk-2">Jour par jour</h3>
-                    <table className="mt-2 w-full text-[13px]">
-                      <thead>
-                        <tr className="text-left text-[12px] text-chalk-3">
-                          <th className="py-1 font-normal">Jour</th>
-                          <th className="py-1 text-right font-normal">Dépense</th>
-                          <th className="py-1 text-right font-normal">ROAS</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[...ad.trend].reverse().map((d) => (
-                          <tr key={d.date} className="border-t border-rule-1">
-                            <td className="num py-1.5 text-chalk-2">{new Date(d.date).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}</td>
-                            <td className="num py-1.5 text-right">{eur(d.spend)}</td>
-                            <td className="num py-1.5 text-right" style={{ color: roasColor(d.roas, thresholds) }}>{roas(d.roas)}</td>
+                    <h3 className="text-[13px] font-medium text-chalk-2">ROAS et dépense, 14 jours</h3>
+                    {thresholds ? (
+                      <div className="mt-2">
+                        <RoasTrend
+                          points={ad.trend.map((d) => ({ date: d.date, roas: d.roas, pnlRoas: null, spend: d.spend, purchases: d.purchases }))}
+                          t={thresholds}
+                          budget={null}
+                          windowDays={windowDays}
+                          showPnl={false}
+                        />
+                      </div>
+                    ) : null}
+                    <details className="mt-3">
+                      <summary className="cursor-pointer text-[12px] text-chalk-3 hover:text-chalk-1">Voir le tableau jour par jour</summary>
+                      <table className="mt-2 w-full text-[13px]">
+                        <thead>
+                          <tr className="text-left text-[12px] text-chalk-3">
+                            <th className="py-1 font-normal">Jour</th>
+                            <th className="py-1 text-right font-normal">Dépense</th>
+                            <th className="py-1 text-right font-normal">Achats</th>
+                            <th className="py-1 text-right font-normal">ROAS</th>
                           </tr>
-                        ))}
-                        {!ad.trend.length ? (
-                          <tr className="border-t border-rule-1">
-                            <td colSpan={3} className="py-2 text-chalk-3">Aucune dépense sur les 7 derniers jours.</td>
-                          </tr>
-                        ) : null}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {[...ad.trend].reverse().filter((d) => d.spend > 0).map((d) => (
+                            <tr key={d.date} className="border-t border-rule-1">
+                              <td className="num py-1.5 text-chalk-2">
+                                {new Date(`${d.date}T00:00:00Z`).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" })}
+                              </td>
+                              <td className="num py-1.5 text-right">{eur(d.spend)}</td>
+                              <td className="num py-1.5 text-right text-chalk-2">{int(d.purchases)}</td>
+                              <td className="num py-1.5 text-right" style={{ color: roasColor(d.roas, thresholds) }}>{roas(d.roas)}</td>
+                            </tr>
+                          ))}
+                          {!ad.trend.some((d) => d.spend > 0) ? (
+                            <tr className="border-t border-rule-1">
+                              <td colSpan={4} className="py-2 text-chalk-3">Aucune dépense sur les 14 derniers jours.</td>
+                            </tr>
+                          ) : null}
+                        </tbody>
+                      </table>
+                    </details>
                   </section>
 
                   <ScriptEditor key={ad.id} shopSlug={shopSlug} adId={ad.id} initial={ad.script ?? ""} />

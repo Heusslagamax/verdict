@@ -10,12 +10,12 @@ import * as repo from "./repo";
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
-/** Resynchronise Meta pour une boutique (14 jours jour par jour + cumuls depuis le lancement). */
+/** Resynchronise Meta pour une boutique (21 jours jour par jour + cumuls depuis le lancement). */
 export async function syncMeta(shop: Shop, creds: Credentials, today = new Date()) {
   if (!creds.meta) return { ok: false, detail: "Jeton Meta absent : ajoute-le dans Réglages → Connexions." };
   if (!shop.metaAdAccountId) return { ok: false, detail: "Compte publicitaire non choisi pour cette boutique." };
   try {
-    const since = iso(new Date(today.getTime() - 13 * 86_400_000));
+    const since = iso(new Date(today.getTime() - 20 * 86_400_000));
     const [campaigns, ads] = await Promise.all([
       fetchCampaigns(creds.meta, shop.metaAdAccountId),
       fetchAds(creds.meta, shop.metaAdAccountId, since, iso(today)),

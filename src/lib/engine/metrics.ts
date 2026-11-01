@@ -7,10 +7,23 @@ export function isoDay(d: Date): string {
 }
 
 /** Jours couverts par une fenêtre, en excluant aujourd'hui (journée incomplète). */
-export function windowDays(window: Window, today: Date): string[] {
-  const n = window === "1d" ? 1 : window === "3d" ? 3 : 7;
+export const WINDOW_DAYS: Record<Window, number> = { "1d": 1, "3d": 3, "7d": 7 };
+
+/**
+ * Jours couverts par une fenêtre, en excluant aujourd'hui (journée incomplète).
+ * `shift` décale d'autant de fenêtres vers le passé (1 = la période précédente).
+ */
+export function windowDays(window: Window, today: Date, shift = 0): string[] {
+  const n = WINDOW_DAYS[window];
   const out: string[] = [];
-  for (let i = 1; i <= n; i++) out.push(isoDay(new Date(today.getTime() - i * DAY_MS)));
+  for (let i = 1; i <= n; i++) out.push(isoDay(new Date(today.getTime() - (i + shift * n) * DAY_MS)));
+  return out;
+}
+
+/** Les n derniers jours complets, du plus ancien au plus récent (axe des graphiques). */
+export function lastDays(n: number, today: Date): string[] {
+  const out: string[] = [];
+  for (let i = n; i >= 1; i--) out.push(isoDay(new Date(today.getTime() - i * DAY_MS)));
   return out;
 }
 
@@ -39,8 +52,8 @@ export function sumDays(days: AdDay[]): Totals {
   };
 }
 
-export function totalsFor(days: AdDay[], window: Window, today: Date): Totals {
-  const keep = new Set(windowDays(window, today));
+export function totalsFor(days: AdDay[], window: Window, today: Date, shift = 0): Totals {
+  const keep = new Set(windowDays(window, today, shift));
   return sumDays(days.filter((d) => keep.has(d.date)));
 }
 

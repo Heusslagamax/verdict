@@ -71,7 +71,7 @@ export function demoMeta(shop: Shop, today: Date): { campaigns: MetaCampaign[]; 
   const seed = shop.slug === "boutique-a" ? 7 : 19;
   const ads: MetaAd[] = NAMES.map(([name, roas, spend], i) => {
     const created = new Date(today.getTime() - (i === 6 ? 1 : 12 + i) * 86_400_000).toISOString();
-    const d = days(seed + i, spend, roas, today, i === 6 ? 1 : 13);
+    const d = days(seed + i, spend, roas, today, i === 6 ? 1 : 20);
     return {
       id: `${shop.slug}-ad-${i + 1}`,
       name,
