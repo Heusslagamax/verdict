@@ -23,14 +23,22 @@ async function structured<S extends z.ZodType>(
   schema: S,
   params: { max_tokens: number; system: string; content: string },
 ): Promise<z.infer<S>> {
-  const msg = await client(apiKey).messages.create({
+  const base = {
     model: env.anthropicModel,
     max_tokens: params.max_tokens,
-    thinking: { type: "disabled" },
     system: params.system,
-    messages: [{ role: "user", content: params.content }],
+    messages: [{ role: "user" as const, content: params.content }],
     output_config: { format: zodOutputFormat(schema) },
-  });
+  };
+  // « between_tools » = pas de réflexion avant de répondre (forme exigée par les modèles 5.5).
+  // Si un autre modèle refuse ce réglage, on relance sans le préciser.
+  let msg;
+  try {
+    msg = await client(apiKey).messages.create({ ...base, thinking: { type: "between_tools" } });
+  } catch (e) {
+    if (!(e instanceof Anthropic.BadRequestError) || !/thinking/i.test(e.message)) throw e;
+    msg = await client(apiKey).messages.create(base);
+  }
   if (msg.stop_reason === "max_tokens") {
     throw new Error("réponse trop longue, coupée avant la fin. Relance : la consigne demande désormais un brief plus court.");
   }
