@@ -4,14 +4,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import type { ReactNode } from "react";
-import { Clapperboard, Gauge, Radar, Settings2, ShieldCheck, Sparkles, LogOut } from "lucide-react";
+import { Clapperboard, GitCompareArrows, Gauge, Radar, Settings2, ShieldCheck, Sparkles, LogOut } from "lucide-react";
 import type { Ctx } from "@/lib/workspace";
 import { Mark } from "./ui";
 import { WorkspaceSwitcher } from "./workspace-switcher";
 
-type Tab = "cockpit" | "radar" | "studio" | "brief" | "reglages" | "admin";
+type Tab = "cockpit" | "radar" | "rapprochement" | "studio" | "brief" | "reglages" | "admin";
 
-const ICONS = { cockpit: Gauge, radar: Radar, studio: Clapperboard, brief: Sparkles, reglages: Settings2, admin: ShieldCheck } as const;
+const ICONS = { cockpit: Gauge, radar: Radar, rapprochement: GitCompareArrows, studio: Clapperboard, brief: Sparkles, reglages: Settings2, admin: ShieldCheck } as const;
 
 /**
  * Coque. Sur grand écran, une barre latérale d'instruments : l'espace, ses boutiques, les
@@ -32,14 +32,15 @@ export function Shell({
   const parts = usePathname().split("/").filter(Boolean);
   const current = shops.some((s) => s.slug === parts[0]) ? parts[0] : null;
   const tab: Tab =
-    parts[0] === "reglages" ? "reglages" : parts[0] === "admin" ? "admin" : parts[1] === "radar" ? "radar" : parts[1] === "studio" ? "studio" : parts[1] === "brief" ? "brief" : "cockpit";
-  const shopHref = (slug: string) => (tab === "radar" || tab === "studio" || tab === "brief" ? `/${slug}/${tab}` : `/${slug}`);
+    parts[0] === "reglages" ? "reglages" : parts[0] === "admin" ? "admin" : parts[1] === "radar" ? "radar" : parts[1] === "studio" ? "studio" : parts[1] === "rapprochement" ? "rapprochement" : parts[1] === "brief" ? "brief" : "cockpit";
+  const shopHref = (slug: string) => (tab === "radar" || tab === "rapprochement" || tab === "studio" || tab === "brief" ? `/${slug}/${tab}` : `/${slug}`);
   const base = current ?? shops[0]?.slug ?? null;
   const tabs: { id: Tab; label: string; href: string }[] = [
     ...(base
       ? [
           { id: "cockpit" as const, label: "Cockpit", href: `/${base}` },
           { id: "radar" as const, label: "Radar concurrents", href: `/${base}/radar` },
+          { id: "rapprochement" as const, label: "Rapprochement", href: `/${base}/rapprochement` },
           { id: "studio" as const, label: "Studio Ads", href: `/${base}/studio` },
           { id: "brief" as const, label: "Brief IA", href: `/${base}/brief` },
         ]

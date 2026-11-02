@@ -217,6 +217,12 @@ export async function fetchVideoSource(token: string, videoId: string): Promise<
   return { source: r.source ?? null, picture: r.picture ?? null };
 }
 
+/** Vignettes générées par Meta à plusieurs instants de la vidéo (repli quand la source n'est pas lisible). */
+export async function fetchVideoThumbnails(token: string, videoId: string): Promise<string[]> {
+  const r = await graph<{ data?: { uri?: string }[] }>(token, `${videoId}/thumbnails`, {});
+  return (r.data ?? []).map((d) => d.uri).filter((u): u is string => Boolean(u));
+}
+
 export interface MetaAccount {
   id: string;
   name: string;

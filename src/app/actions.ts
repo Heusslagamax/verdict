@@ -11,6 +11,7 @@ import { briefPayload, buildCockpit, buildRadar } from "@/lib/data/views";
 import { findSource, verifyAnthropicKey, writeMorningBrief, writeStudioBriefs } from "@/lib/adapters/ai";
 import { buildStudio, studioPayload, type CompetitorStudioSource } from "@/lib/data/studio";
 import { MAX_BRIEFS, RULES } from "@/lib/engine/studio";
+import { fingerprintCreative, matchOwnAd, rapprochementPlan } from "@/lib/data/rapprochement";
 import { lookup, verifyTrendtrackKey } from "@/lib/adapters/trendtrack";
 import { verifyMetaToken, type MetaAccount } from "@/lib/adapters/meta";
 import {
@@ -524,5 +525,68 @@ export async function saveProductBriefAction(slug: string, text: string): Promis
     return { ok: true, message: "Fiche produit enregistrée" };
   } catch (e) {
     return { ok: false, message: e instanceof z.ZodError ? e.issues[0].message : errMsg(e) };
+  }
+}
+
+// ---------- Rapprochement ----------
+export async function rapprochementPlanAction(slug: string, force = false) {
+  const { workspace } = await requireWorkspace();
+  try {
+    const creds = await getCredentials(workspace.id);
+    if (!creds.anthropic) return { ok: false as const, message: "Ajoute ta clé Anthropic dans Réglages → Connexions pour lancer le rapprochement." };
+    return { ok: true as const, plan: await rapprochementPlan(workspace, slug, { force }) };
+  } catch (e) {
+    return { ok: false as const, message: errMsg(e) };
+  }
+}
+
+/** Une créa par appel : la progression s'affiche et aucun appel ne dépasse le temps limite. */
+export async function fingerprintAction(slug: string, kind: "own" | "competitor", refId: string) {
+  const { workspace } = await requireWorkspace();
+  try {
+    const r = await fingerprintCreative(workspace, slug, z.enum(["own", "competitor"]).parse(kind), z.string().min(1).max(128).parse(refId));
+    return r.ok ? { ok: true, message: "" } : { ok: false, message: r.error ?? "échec" };
+  } catch (e) {
+    return { ok: false, message: errMsg(e) };
+  }
+}
+
+export async function matchAction(slug: string, adId: string) {
+  const { workspace } = await requireWorkspace();
+  try {
+    const r = await matchOwnAd(workspace, slug, z.string().min(1).max(64).parse(adId));
+    return r.ok ? { ok: true, message: "" } : { ok: false, message: r.error ?? "échec" };
+  } catch (e) {
+    return { ok: false, message: `IA : ${errMsg(e)}` };
+  }
+}
+
+export async function finishRapprochementAction(slug: string) {
+  await requireWorkspace();
+  revalidatePath(`/${slug}`, "layout");
+}
+
+/** Confirme d'un coup les correspondances sûres (copie 1:1 ou itération, confiance haute). */
+export async function confirmSureMatchesAction(slug: string): Promise<ActionResult> {
+  const { workspace, viewer } = await requireWorkspace();
+  try {
+    const shop = await shopOrThrow(workspace.id, slug);
+    const [matches, links] = await Promise.all([repo.readMatches(shop), repo.readSourceLinks(shop)]);
+    const settled = new Set(links.filter((l) => l.status === "confirmed").map((l) => l.adId));
+    const rejected = new Set(links.filter((l) => l.status === "rejected").map((l) => `${l.adId}:${l.competitorAdId}`));
+    const best = new Map<string, repo.MatchRow>();
+    for (const m of matches) {
+      if (m.confidence !== "haute" || (m.relation !== "copie_1_1" && m.relation !== "iteration")) continue;
+      if (settled.has(m.adId) || rejected.has(`${m.adId}:${m.competitorAdId}`)) continue;
+      const prev = best.get(m.adId);
+      if (!prev || (m.relation === "copie_1_1" && prev.relation !== "copie_1_1") || m.imageShare > prev.imageShare) best.set(m.adId, m);
+    }
+    for (const m of best.values()) {
+      await repo.setSourceLink(shop, { adId: m.adId, competitorId: m.competitorId, competitorAdId: m.competitorAdId, status: "confirmed", method: "ia" }, viewer.demo ? null : viewer.id);
+    }
+    revalidatePath(`/${slug}`, "layout");
+    return { ok: true, message: best.size ? `${best.size} source${best.size > 1 ? "s" : ""} confirmée${best.size > 1 ? "s" : ""}` : "Aucune correspondance sûre à confirmer" };
+  } catch (e) {
+    return { ok: false, message: errMsg(e) };
   }
 }

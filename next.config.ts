@@ -9,6 +9,12 @@ const nextConfig: NextConfig = {
     // navigateur) ; les données restent fraîches grâce à la resynchronisation en arrière-plan.
     staleTimes: { dynamic: 30, static: 180 },
   },
+  // ffmpeg (binaire) et sharp restent des modules Node natifs, hors du bundle.
+  serverExternalPackages: ["ffmpeg-static", "sharp"],
+  // Le binaire ffmpeg n'est embarqué que dans la fonction du Rapprochement (~80 Mo).
+  outputFileTracingIncludes: {
+    "/[shop]/rapprochement": ["./node_modules/ffmpeg-static/ffmpeg"],
+  },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "**.fbcdn.net" },

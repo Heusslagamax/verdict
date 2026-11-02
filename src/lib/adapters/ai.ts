@@ -21,7 +21,7 @@ const client = (apiKey: string) => new Anthropic({ apiKey });
 async function structured<S extends z.ZodType>(
   apiKey: string,
   schema: S,
-  params: { max_tokens: number; system: string; content: string },
+  params: { max_tokens: number; system: string; content: string | Anthropic.ContentBlockParam[] },
 ): Promise<z.infer<S>> {
   const base = {
     model: env.anthropicModel,
@@ -178,5 +178,95 @@ export async function writeStudioBriefs(apiKey: string, payload: unknown): Promi
       "production = comment la produire avec les outils simples de la méthode (CapCut, ElevenLabs, Canva, plans du concurrent ou B-rolls), en 2-3 phrases. " +
       "why = pourquoi ce brief, relié aux chiffres et au diagnostic, en une ou deux phrases. Réponds en français (sauf script).",
     content: JSON.stringify(payload).slice(0, 50_000),
+  });
+}
+
+// ---------- Rapprochement : fiche d'une créa et jugement d'une paire ----------
+const jpeg = (b64: string): Anthropic.ImageBlockParam => ({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } });
+
+export const CreativeCard = z.object({
+  format: z.string(),
+  concept: z.string(),
+  angle: z.string(),
+  message: z.string(),
+  hook: z.object({ text: z.string(), visual: z.string() }),
+  awareness: z.enum(["unaware", "problem_aware", "solution_aware", "product_aware", "most_aware"]),
+  avatar: z.string(),
+  offer: z.string().nullable(),
+  keyShots: z.array(z.string()),
+});
+export type CreativeCard = z.infer<typeof CreativeCard>;
+
+/** Fiche d'une créa à partir de ses images clés et de son texte, toujours en français (comparable d'une langue à l'autre). */
+export async function analyzeCreative(
+  apiKey: string,
+  input: { frames: { t: number; b64: string }[]; script: string | null; body: string | null; isVideo: boolean },
+): Promise<CreativeCard> {
+  const content: Anthropic.ContentBlockParam[] = [];
+  for (const f of input.frames) {
+    content.push({ type: "text", text: input.isVideo ? `Image à ${f.t} s :` : "Visuel :" });
+    content.push(jpeg(f.b64));
+  }
+  content.push({
+    type: "text",
+    text:
+      `Script ou transcription : ${input.script?.slice(0, 2500) ?? "(aucun)"}\nTexte d'annonce : ${input.body?.slice(0, 1200) ?? "(aucun)"}\n\n` +
+      "Fais la fiche de cette créa publicitaire.",
+  });
+  return structured(apiKey, CreativeCard, {
+    max_tokens: 2000,
+    system:
+      "Tu es creative strategist e-commerce (méthode Zecom). Tu décris une pub à partir de ses images clés et de son texte, en FRANÇAIS même si la pub est dans une autre langue, " +
+      "pour pouvoir la comparer à d'autres pubs. format = type de créa (UGC face cam, mashup voix off, statique offre, avant/après, VSL…). concept = la grande idée. " +
+      "angle = déclencheur émotionnel + lutte ou résultat visé. message = la promesse précise. hook = accroche (texte/voix) et ce qu'on voit dans les premières secondes. " +
+      "avatar = à qui elle parle. offer = l'offre visible (ex. 1+1 offert) ou null. keyShots = 3 à 6 plans marquants décrits en quelques mots (objets, gestes, lieux, personnes). Phrases courtes, factuelles.",
+    content,
+  });
+}
+
+export const MatchVerdict = z.object({
+  relation: z.enum(["copie_1_1", "iteration", "meme_angle", "different"]),
+  confidence: z.enum(["haute", "moyenne", "faible"]),
+  criteria: z.object({ images: z.boolean(), script: z.boolean(), angle: z.boolean(), hook: z.boolean(), offre: z.boolean() }),
+  evidence: z.string(),
+});
+export type MatchVerdict = z.infer<typeof MatchVerdict>;
+
+/** Juge si ma pub copie la pub concurrente, critère par critère, images à l'appui. */
+export async function judgeMatch(
+  apiKey: string,
+  input: {
+    own: { name: string; card: CreativeCard | null; script: string | null; frames: { t: number; b64: string }[] };
+    competitor: { name: string; card: CreativeCard | null; script: string | null; frames: { t: number; b64: string }[] };
+    imageMatch: { share: number; pairs: { a: number; b: number; distance: number }[] };
+  },
+): Promise<MatchVerdict> {
+  const content: Anthropic.ContentBlockParam[] = [{ type: "text", text: `MA PUB « ${input.own.name} » :` }];
+  for (const f of input.own.frames) content.push({ type: "text", text: `${f.t} s` }, jpeg(f.b64));
+  content.push({ type: "text", text: `PUB CONCURRENTE « ${input.competitor.name} » :` });
+  for (const f of input.competitor.frames) content.push({ type: "text", text: `${f.t} s` }, jpeg(f.b64));
+  content.push({
+    type: "text",
+    text: JSON.stringify({
+      maFiche: input.own.card,
+      monScript: input.own.script?.slice(0, 2000) ?? null,
+      ficheConcurrente: input.competitor.card,
+      scriptConcurrent: input.competitor.script?.slice(0, 2000) ?? null,
+      empreintesVisuelles: {
+        partDesPlansRetrouves: Math.round(input.imageMatch.share * 100),
+        pairesDePlans: input.imageMatch.pairs,
+      },
+    }),
+  });
+  return structured(apiKey, MatchVerdict, {
+    max_tokens: 1200,
+    system:
+      "Tu compares deux pubs pour savoir si la première est la copie de la seconde. Tu regardes les IMAGES (mêmes plans, mêmes acteurs, mêmes décors, même produit filmé pareil) " +
+      "ET le SCRIPT (une traduction fidèle compte comme le même script), jamais l'image seule. Les empreintes visuelles mesurées sont un indice fiable : des plans retrouvés à distance ≤ 10 sont les mêmes images. " +
+      "copie_1_1 = mêmes images et même script (même traduit) ; iteration = même base (images ou script) avec un élément changé (hook, voix, durée, acteur…) ; " +
+      "meme_angle = images et script différents mais même angle et même message ; different = rien de tout ça. " +
+      "criteria : images = des plans identiques sont visibles ; script = même texte (traduit ou non) ; angle = même angle ; hook = même accroche ou même plan d'ouverture ; offre = même offre. " +
+      "confidence haute seulement si les preuves sont nettes. evidence = 1 à 2 phrases en français qui citent les preuves (ex. « le plan de la basket à 2 s est le même qu'à 14 s chez le concurrent »).",
+    content,
   });
 }

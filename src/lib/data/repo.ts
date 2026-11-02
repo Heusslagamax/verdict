@@ -603,3 +603,126 @@ export async function deleteStudioBrief(shop: Shop, id: string) {
   const { error } = await supabaseAdmin().from("studio_briefs").delete().eq("id", id).eq("shop_id", shop.id);
   if (error) throw error;
 }
+
+// ---------- Rapprochement ----------
+export interface FingerprintRow {
+  kind: "own" | "competitor";
+  refId: string;
+  media: "video" | "image" | "thumbnail" | "none";
+  frames: { t: number; hash: string }[];
+  thumbs: { t: number; b64: string }[];
+  card: import("@/lib/adapters/ai").CreativeCard | null;
+  error: string | null;
+  updatedAt: string;
+}
+
+export async function readFingerprints(shop: Shop): Promise<FingerprintRow[]> {
+  if (demoMode || shop.id.startsWith("demo")) return [];
+  const { data, error } = await supabaseAdmin().from("creative_fingerprints").select("*").eq("shop_id", shop.id);
+  if (error) throw error;
+  return (data ?? []).map((r) => ({
+    kind: r.kind,
+    refId: r.ref_id,
+    media: r.media,
+    frames: r.frames ?? [],
+    thumbs: r.thumbs ?? [],
+    card: r.card ?? null,
+    error: r.error,
+    updatedAt: r.updated_at,
+  }));
+}
+
+/** Liste légère (sans les images) : ce qui est déjà analysé. */
+export async function listFingerprintKeys(shop: Shop): Promise<{ kind: string; refId: string; ok: boolean }[]> {
+  if (demoMode || shop.id.startsWith("demo")) return [];
+  const { data, error } = await supabaseAdmin().from("creative_fingerprints").select("kind,ref_id,error,card").eq("shop_id", shop.id);
+  if (error) throw error;
+  return (data ?? []).map((r) => ({ kind: r.kind, refId: r.ref_id, ok: !r.error && Boolean(r.card) }));
+}
+
+export async function saveFingerprint(shop: Shop, f: Omit<FingerprintRow, "updatedAt">) {
+  if (demoMode || shop.id.startsWith("demo")) return;
+  const { error } = await supabaseAdmin().from("creative_fingerprints").upsert({
+    shop_id: shop.id,
+    kind: f.kind,
+    ref_id: f.refId,
+    media: f.media,
+    frames: f.frames,
+    thumbs: f.thumbs,
+    card: f.card,
+    error: f.error,
+    updated_at: new Date().toISOString(),
+  });
+  if (error) throw error;
+}
+
+export interface MatchRow {
+  adId: string;
+  competitorAdId: string;
+  competitorId: string | null;
+  relation: "copie_1_1" | "iteration" | "meme_angle" | "different";
+  confidence: "haute" | "moyenne" | "faible";
+  criteria: { images: boolean; script: boolean; angle: boolean; hook: boolean; offre: boolean };
+  imageShare: number;
+  framePairs: { a: number; b: number; distance: number }[];
+  evidence: string;
+  createdAt: string;
+}
+
+export async function readMatches(shop: Shop): Promise<MatchRow[]> {
+  if (demoMode || shop.id.startsWith("demo")) {
+    // Exemple fictif pour voir l'écran en mode démo.
+    return [
+      {
+        adId: `${shop.slug}-ad-2`,
+        competitorAdId: `${shop.slug}-k1-ad-1`,
+        competitorId: `${shop.slug}-k1`,
+        relation: "copie_1_1",
+        confidence: "haute",
+        criteria: { images: true, script: true, angle: true, hook: true, offre: false },
+        imageShare: 0.83,
+        framePairs: [],
+        evidence: "Exemple fictif : 5 plans sur 6 identiques (dont le hook à 0,5 s) et script traduit mot pour mot ; seule l'offre change (1+1 au lieu de -50 %).",
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  }
+  const { data, error } = await supabaseAdmin().from("source_matches").select("*").eq("shop_id", shop.id);
+  if (error) throw error;
+  return (data ?? []).map((r) => ({
+    adId: r.ad_id,
+    competitorAdId: r.competitor_ad_id,
+    competitorId: r.competitor_id,
+    relation: r.relation,
+    confidence: r.confidence,
+    criteria: r.criteria,
+    imageShare: Number(r.image_share),
+    framePairs: r.frame_pairs ?? [],
+    evidence: r.evidence,
+    createdAt: r.created_at,
+  }));
+}
+
+/** Remplace les correspondances jugées d'une de mes pubs. */
+export async function replaceMatches(shop: Shop, adId: string, rows: Omit<MatchRow, "adId" | "createdAt">[]) {
+  if (demoMode || shop.id.startsWith("demo")) return;
+  const db = supabaseAdmin();
+  const del = await db.from("source_matches").delete().eq("shop_id", shop.id).eq("ad_id", adId);
+  if (del.error) throw del.error;
+  if (!rows.length) return;
+  const { error } = await db.from("source_matches").insert(
+    rows.map((r) => ({
+      shop_id: shop.id,
+      ad_id: adId,
+      competitor_ad_id: r.competitorAdId,
+      competitor_id: r.competitorId,
+      relation: r.relation,
+      confidence: r.confidence,
+      criteria: r.criteria,
+      image_share: r.imageShare,
+      frame_pairs: r.framePairs,
+      evidence: r.evidence,
+    })),
+  );
+  if (error) throw error;
+}

@@ -170,12 +170,13 @@ export async function buildCockpit(
   if (!shop) return null;
   const creds = await getCredentials(ws.id);
 
-  const [{ snap, error: syncError, stale }, scripts, pnl, competitors, links] = await Promise.all([
+  const [{ snap, error: syncError, stale }, scripts, pnl, competitors, links, matches] = await Promise.all([
     ensureFreshMeta(shop, creds, today, { block: opts.blockOnStaleMeta }),
     repo.readScripts(shop),
     loadPnl(ws, shop, today),
     repo.listCompetitors(shop),
     repo.readSourceLinks(shop),
+    repo.readMatches(shop),
   ]);
   const [compAds, aiMatches] = await Promise.all([repo.readCompetitorAds(competitors, today), repo.readAiMatches(competitors)]);
 
@@ -199,6 +200,17 @@ export async function buildCockpit(
     links,
     aiMatches,
   );
+  // Rapprochement (images + script + fiches, jugé par l'IA) : prioritaire sur les simples ressemblances de texte.
+  const rejected = new Set(links.filter((l) => l.status === "rejected").map((l) => `${l.adId}:${l.competitorAdId}`));
+  const RELATION = { copie_1_1: [0.97, "Copie 1:1"], iteration: [0.85, "Itération"], meme_angle: [0.6, "Même angle"] } as const;
+  for (const m of matches) {
+    if (m.relation === "different" || confirmed.has(m.adId) || rejected.has(`${m.adId}:${m.competitorAdId}`)) continue;
+    const [base, label] = RELATION[m.relation];
+    const score = base - (m.confidence === "faible" ? 0.15 : m.confidence === "moyenne" ? 0.05 : 0);
+    const list = (suggestions.get(m.adId) ?? []).filter((x) => x.competitorAdId !== m.competitorAdId);
+    list.push({ competitorAdId: m.competitorAdId, competitorId: m.competitorId ?? "", score, method: "ia", reason: `Rapprochement · ${label} (confiance ${m.confidence}) : ${m.evidence}` });
+    suggestions.set(m.adId, list.sort((x, y) => y.score - x.score).slice(0, 3));
+  }
   const sourceOf = (adId: string): AdSource => {
     const l = confirmed.get(adId);
     if (!l) return { status: "none" };
